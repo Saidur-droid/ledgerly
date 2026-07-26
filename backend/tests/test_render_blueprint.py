@@ -18,7 +18,7 @@ def test_render_blueprint_is_deployable_without_configuration_prompts():
     assert service["healthCheckPath"] == "/health"
     assert service["autoDeployTrigger"] == "checksPass"
     assert "pip install --no-cache-dir -r requirements.txt" in service["buildCommand"]
-    assert "uvicorn app.main:app" in service["startCommand"]
+    assert service["startCommand"].startswith("python -m uvicorn app.main:app ")
     assert "--host 0.0.0.0" in service["startCommand"]
     assert "--port $PORT" in service["startCommand"]
 

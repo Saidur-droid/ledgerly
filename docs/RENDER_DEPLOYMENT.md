@@ -9,6 +9,7 @@ The backend is defined entirely by the root-level `render.yaml`. Its initial dep
 - [x] Runtime is Python `3.12.4`.
 - [x] Production dependencies are pinned in `backend/requirements.txt`.
 - [x] Build command installs only production dependencies.
+- [x] `python -m uvicorn app.main:app` loads the canonical FastAPI entry point.
 - [x] Uvicorn binds to `0.0.0.0` and Render's dynamic `$PORT`.
 - [x] Proxy headers are enabled for Render's TLS-terminating proxy.
 - [x] `/health` is configured as the service health check.
