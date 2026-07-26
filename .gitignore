@@ -1,0 +1,25 @@
+# dependencies and builds
+node_modules/
+.next/
+dist/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# local data and secrets
+.env
+*.db
+backend/data/
+
+# editor and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.frontend-scaffold-git-backup/
+
+# reports
+coverage/
+htmlcov/
