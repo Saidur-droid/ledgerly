@@ -1,19 +1,29 @@
+import pytest
+
+
 def test_health(client):
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
 
 
-def test_cors_allows_configured_frontend(client):
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://localhost:3000",
+        "https://ledgerly-one-xi.vercel.app",
+    ],
+)
+def test_cors_allows_configured_frontend(client, origin):
     response = client.options(
         "/api/v1/auth/register",
         headers={
-            "Origin": "http://localhost:3000",
+            "Origin": origin,
             "Access-Control-Request-Method": "POST",
         },
     )
     assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.headers["access-control-allow-origin"] == origin
 
 
 def test_cors_rejects_unconfigured_origin(client):

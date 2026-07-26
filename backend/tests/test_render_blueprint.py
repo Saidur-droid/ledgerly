@@ -16,7 +16,7 @@ def test_render_blueprint_is_deployable_without_configuration_prompts():
     assert service["rootDir"] == "backend"
     assert service["plan"] == "starter"
     assert service["healthCheckPath"] == "/health"
-    assert service["autoDeployTrigger"] == "checksPass"
+    assert service["autoDeployTrigger"] == "commit"
     assert "pip install --no-cache-dir -r requirements.txt" in service["buildCommand"]
     assert service["startCommand"].startswith("python -m uvicorn app.main:app ")
     assert "--host 0.0.0.0" in service["startCommand"]

@@ -2,6 +2,9 @@ import os
 
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["SECRET_KEY"] = "test-secret-key-with-more-than-thirty-two-characters"
+os.environ["CORS_ORIGINS"] = (
+    "http://localhost:3000,https://ledgerly-one-xi.vercel.app"
+)
 
 import pytest
 from fastapi.testclient import TestClient
