@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.core.config import DEVELOPMENT_SECRET, Settings
+from app.core.config import DEVELOPMENT_SECRET, PRODUCTION_FRONTEND_ORIGIN, Settings
 
 
 def test_cors_origins_are_normalized():
@@ -28,3 +28,12 @@ def test_production_rejects_wildcard_cors():
             secret_key="a-unique-production-secret-that-is-long-enough",
             cors_origins="*",
         )
+
+
+def test_production_always_allows_the_deployed_vercel_frontend():
+    settings = Settings(
+        app_env="production",
+        secret_key="a-unique-production-secret-that-is-long-enough",
+        cors_origins="http://localhost:3000",
+    )
+    assert PRODUCTION_FRONTEND_ORIGIN in settings.allowed_origins

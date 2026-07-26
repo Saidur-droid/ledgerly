@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -38,6 +38,18 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import {
+  ApiError,
+  askBusiness,
+  downloadLatestReport,
+  getCurrentUser,
+  getLatestPulse,
+  hasSession,
+  listUploads,
+  type Pulse,
+  type User,
+  uploadBusinessData,
+} from "@/lib/api";
 
 const revenue = [
   { month: "Jan", revenue: 38200, expenses: 24100 },
@@ -82,6 +94,10 @@ export default function Dashboard() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [period, setPeriod] = useState("Last 6 months");
   const [fileName, setFileName] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [uploadCount, setUploadCount] = useState(6);
+  const [livePulse, setLivePulse] = useState<Pulse | null>(null);
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([
     {
@@ -91,26 +107,78 @@ export default function Dashboard() {
   ]);
   const fileInput = useRef<HTMLInputElement>(null);
   const margin = useMemo(
-    () => Math.round(((55842 - 29510) / 55842) * 100),
-    [],
+    () => Math.round(livePulse?.metrics.net_margin ?? ((55842 - 29510) / 55842) * 100),
+    [livePulse],
   );
 
-  function submitQuestion(prompt = question) {
+  useEffect(() => {
+    if (!hasSession()) return;
+    void Promise.allSettled([
+      getCurrentUser(),
+      listUploads(),
+      getLatestPulse(),
+    ]).then(([userResult, uploadsResult, pulseResult]) => {
+      if (userResult.status === "fulfilled") setCurrentUser(userResult.value);
+      if (uploadsResult.status === "fulfilled") setUploadCount(uploadsResult.value.length);
+      if (pulseResult.status === "fulfilled") setLivePulse(pulseResult.value);
+    });
+  }, []);
+
+  async function submitQuestion(prompt = question) {
     const clean = prompt.trim();
     if (!clean) return;
-    setMessages((current) => [
-      ...current,
-      { role: "user", text: clean },
-      {
+    setMessages((current) => [...current, { role: "user", text: clean }]);
+    setQuestion("");
+    if (!hasSession()) {
+      setMessages((current) => [...current, {
         role: "assistant",
         text: "Revenue rose 9.3% versus your previous upload, led by stronger May and June sales. Operating costs grew more slowly at 3.8%, so your net margin improved by 2.1 percentage points. This is an explanation of your uploaded data, not financial advice.",
-      },
-    ]);
-    setQuestion("");
+      }]);
+      return;
+    }
+    try {
+      const response = await askBusiness(clean);
+      setMessages((current) => [...current, { role: "assistant", text: response.answer }]);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      setMessages((current) => [...current, {
+        role: "assistant",
+        text: error instanceof Error ? error.message : "I couldn’t reach your business data.",
+      }]);
+    }
   }
 
-  function exportReport() {
-    window.print();
+  async function exportReport() {
+    if (!hasSession()) {
+      window.print();
+      return;
+    }
+    try {
+      await downloadLatestReport();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Unable to export the report.");
+    }
+  }
+
+  async function analyzeFile() {
+    if (!selectedFile) return;
+    if (!hasSession()) {
+      window.location.href = "/login";
+      return;
+    }
+    try {
+      const pulse = await uploadBusinessData(selectedFile);
+      setLivePulse(pulse);
+      setUploadCount((count) => count + 1);
+      setUploadOpen(false);
+      setSelectedFile(null);
+      setFileName("");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Unable to analyze this file.");
+    }
   }
 
   return (
@@ -149,7 +217,7 @@ export default function Dashboard() {
           <button className="nav-item"><Settings size={18} /><span>Settings</span></button>
           <div className="profile-row">
             <div className="profile-avatar">MP</div>
-            <span><strong>Maya Patel</strong><small>maya@northstar.co</small></span>
+            <span><strong>{currentUser?.full_name ?? "Maya Patel"}</strong><small>{currentUser?.email ?? "maya@northstar.co"}</small></span>
             <ChevronDown size={14} />
           </div>
         </div>
@@ -170,7 +238,7 @@ export default function Dashboard() {
           <section className="page-heading">
             <div>
               <p className="eyebrow"><span /> LIVE BUSINESS VIEW</p>
-              <h1>Good morning, Maya.</h1>
+              <h1>Good morning, {currentUser?.full_name.split(" ")[0] ?? "Maya"}.</h1>
               <p>Here&apos;s what your business is telling us today.</p>
             </div>
             <div className="period-control">
@@ -183,7 +251,7 @@ export default function Dashboard() {
 
           <section className="pulse-card">
             <div className="pulse-score">
-              <div className="score-ring"><span>86</span><small>/100</small></div>
+              <div className="score-ring"><span>{livePulse?.score ?? 86}</span><small>/100</small></div>
               <div><p>Business Pulse™</p><h2>Your business looks strong</h2><span className="confidence"><Check size={13} />High confidence</span></div>
             </div>
             <div className="pulse-copy">
@@ -251,8 +319,8 @@ export default function Dashboard() {
               <div className="memory-icon"><Zap size={22} /></div>
               <span className="memory-kicker">BUSINESS MEMORY</span>
               <h3>Ledgerly remembers your story.</h3>
-              <p>This is your 6th upload. We compare every new file with your history so context is never lost.</p>
-              <div className="memory-stats"><div><strong>6</strong><span>Uploads</span></div><div><strong>18 mo</strong><span>History</span></div><div><strong>94%</strong><span>Data match</span></div></div>
+              <p>This is your {uploadCount}th upload. We compare every new file with your history so context is never lost.</p>
+              <div className="memory-stats"><div><strong>{uploadCount}</strong><span>Uploads</span></div><div><strong>18 mo</strong><span>History</span></div><div><strong>94%</strong><span>Data match</span></div></div>
               <button onClick={() => setUploadOpen(true)}><Upload size={15} />Upload new data</button>
             </article>
           </section>
@@ -268,14 +336,14 @@ export default function Dashboard() {
             <div className="modal-icon"><CloudUpload size={24} /></div>
             <h2 id="upload-title">Connect your business data</h2>
             <p>Upload a statement or export. Ledgerly will identify your business metrics automatically.</p>
-            <input ref={fileInput} hidden type="file" accept=".csv,.xlsx,.pdf,.json" onChange={(e) => setFileName(e.target.files?.[0]?.name ?? "")} />
+            <input ref={fileInput} hidden type="file" accept=".csv,.xlsx,.pdf,.json" onChange={(e) => { const file = e.target.files?.[0] ?? null; setSelectedFile(file); setFileName(file?.name ?? ""); }} />
             <button className="dropzone" onClick={() => fileInput.current?.click()}>
               <Upload size={24} />
               <strong>{fileName || "Drop your file here, or browse"}</strong>
               <span>CSV, XLSX, PDF, or JSON · Up to 20 MB</span>
             </button>
             <div className="privacy-note"><Check size={14} /><span>Your data is encrypted and used only to explain your business.</span></div>
-            <button className="modal-primary" disabled={!fileName} onClick={() => setUploadOpen(false)}>{fileName ? "Analyze this file" : "Choose a file"}</button>
+            <button className="modal-primary" disabled={!fileName} onClick={analyzeFile}>{fileName ? "Analyze this file" : "Choose a file"}</button>
           </div>
         </div>
       )}
@@ -284,7 +352,7 @@ export default function Dashboard() {
         <div className="chat-header"><div><span className="bot-icon"><Bot size={18} /></span><span><strong>Ask Ledgerly</strong><small><i />Ready with your business context</small></span></div><button onClick={() => setChatOpen(false)}><X size={18} /></button></div>
         <div className="chat-context"><Sparkles size={14} /><span>Answering only from <strong>Northstar Studio</strong> data</span></div>
         <div className="messages">
-          {messages.map((message, index) => <div key={`${message.role}-${index}`} className={`message ${message.role}`}><p>{message.text}</p>{message.role === "assistant" && <small>Based on your 6 uploads · High confidence</small>}</div>)}
+          {messages.map((message, index) => <div key={`${message.role}-${index}`} className={`message ${message.role}`}><p>{message.text}</p>{message.role === "assistant" && <small>Based on your {uploadCount} uploads · High confidence</small>}</div>)}
           {messages.length === 1 && <div className="quick-questions">{quickQuestions.map((item) => <button key={item} onClick={() => submitQuestion(item)}>{item}</button>)}</div>}
         </div>
         <div className="chat-composer"><textarea value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitQuestion(); } }} placeholder="Ask about your business..." /><button onClick={() => submitQuestion()}><Send size={16} /></button><small>Ledgerly explains your data — it doesn&apos;t give financial advice.</small></div>

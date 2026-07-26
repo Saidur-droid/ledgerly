@@ -4,6 +4,7 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEVELOPMENT_SECRET = "development-only-change-this-key-now"
+PRODUCTION_FRONTEND_ORIGIN = "https://ledgerly-one-xi.vercel.app"
 
 
 class Settings(BaseSettings):
@@ -21,7 +22,10 @@ class Settings(BaseSettings):
 
     @property
     def allowed_origins(self) -> list[str]:
-        return [origin.strip().rstrip("/") for origin in self.cors_origins.split(",") if origin.strip()]
+        origins = [origin.strip().rstrip("/") for origin in self.cors_origins.split(",") if origin.strip()]
+        if self.app_env.lower() == "production" and PRODUCTION_FRONTEND_ORIGIN not in origins:
+            origins.append(PRODUCTION_FRONTEND_ORIGIN)
+        return origins
 
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":

@@ -3,15 +3,21 @@
 import { useState } from "react";
 import { ArrowRight, Check, Eye, EyeOff, Sparkles, TrendingUp } from "lucide-react";
 import Link from "next/link";
+import { clearSession, login } from "@/lib/api";
 
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    window.location.href = "/";
+    try {
+      await login(email, password);
+      window.location.href = "/";
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Unable to sign in.");
+    }
   }
 
   return (
@@ -41,7 +47,7 @@ export default function LoginPage() {
           <div className="login-options"><label><input type="checkbox" />Remember me</label><a href="#">Forgot password?</a></div>
           <button className="sign-in-button">Sign in <ArrowRight size={16} /></button>
           <div className="login-divider"><span>or</span></div>
-          <button type="button" className="demo-button" onClick={() => { window.location.href = "/"; }}>Explore the live demo</button>
+          <button type="button" className="demo-button" onClick={() => { clearSession(); window.location.href = "/"; }}>Explore the live demo</button>
           <p className="signup-copy">New to Ledgerly? <a href="#">Create your account</a></p>
           <small className="security-copy">Your business data is encrypted in transit and at rest.</small>
         </form>
