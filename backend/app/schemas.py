@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 
 class UserCreate(BaseModel):
@@ -14,6 +14,21 @@ class UserRead(BaseModel):
     email: EmailStr
     full_name: str
     model_config = ConfigDict(from_attributes=True)
+
+
+class UserUpdate(BaseModel):
+    email: EmailStr | None = None
+    full_name: str | None = Field(default=None, min_length=2, max_length=120)
+
+    @model_validator(mode="after")
+    def require_update(self) -> "UserUpdate":
+        if self.email is None and self.full_name is None:
+            raise ValueError("Provide an email or full name to update.")
+        return self
+
+
+class SettingsRead(BaseModel):
+    profile: UserRead
 
 
 class Token(BaseModel):

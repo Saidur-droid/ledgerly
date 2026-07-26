@@ -15,7 +15,17 @@ from app.core.database import get_db
 from app.core.security import create_access_token, get_current_user, hash_password, verify_password
 from app.models import Pulse, Upload, User
 from app.report_engine.pdf import build_pulse_report
-from app.schemas import ChatRequest, ChatResponse, PulseRead, Token, UploadRead, UserCreate, UserRead
+from app.schemas import (
+    ChatRequest,
+    ChatResponse,
+    PulseRead,
+    SettingsRead,
+    Token,
+    UploadRead,
+    UserCreate,
+    UserRead,
+    UserUpdate,
+)
 
 router = APIRouter(prefix="/api/v1")
 
@@ -41,6 +51,35 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
 
 @router.get("/me", response_model=UserRead)
 def read_me(user: User = Depends(get_current_user)) -> User:
+    return user
+
+
+@router.get("/settings", response_model=SettingsRead)
+def read_settings(user: User = Depends(get_current_user)) -> SettingsRead:
+    return SettingsRead(profile=UserRead.model_validate(user))
+
+
+@router.patch("/settings/profile", response_model=UserRead)
+def update_profile(
+    payload: UserUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    if payload.email is not None:
+        email = payload.email.lower()
+        existing_user = db.scalar(
+            select(User).where(User.email == email, User.id != user.id)
+        )
+        if existing_user is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="An account already exists for this email.",
+            )
+        user.email = email
+    if payload.full_name is not None:
+        user.full_name = payload.full_name.strip()
+    db.commit()
+    db.refresh(user)
     return user
 
 

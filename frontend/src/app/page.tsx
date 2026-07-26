@@ -41,13 +41,16 @@ import {
 import {
   ApiError,
   askBusiness,
+  clearSession,
   downloadLatestReport,
   getCurrentUser,
   getLatestPulse,
+  getSettings,
   hasSession,
   listUploads,
   type Pulse,
   type User,
+  updateProfile,
   uploadBusinessData,
 } from "@/lib/api";
 
@@ -92,10 +95,14 @@ export default function Dashboard() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [period, setPeriod] = useState("Last 6 months");
   const [fileName, setFileName] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
   const [uploadCount, setUploadCount] = useState(6);
   const [livePulse, setLivePulse] = useState<Pulse | null>(null);
   const [question, setQuestion] = useState("");
@@ -123,6 +130,43 @@ export default function Dashboard() {
       if (pulseResult.status === "fulfilled") setLivePulse(pulseResult.value);
     });
   }, []);
+
+  async function openSettings() {
+    if (!hasSession()) {
+      window.location.href = "/login";
+      return;
+    }
+    try {
+      const settings = await getSettings();
+      setProfileName(settings.profile.full_name);
+      setProfileEmail(settings.profile.email);
+      setSettingsOpen(true);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Unable to load settings.");
+    }
+  }
+
+  async function saveProfile(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingProfile(true);
+    try {
+      const user = await updateProfile({
+        full_name: profileName,
+        email: profileEmail,
+      });
+      setCurrentUser(user);
+      setSettingsOpen(false);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Unable to update your profile.");
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
+  function logout() {
+    clearSession();
+    window.location.href = "/login";
+  }
 
   async function submitQuestion(prompt = question) {
     const clean = prompt.trim();
@@ -214,8 +258,8 @@ export default function Dashboard() {
             <small>Strong · Updated today</small>
           </div>
           <button className="nav-item"><CircleHelp size={18} /><span>Help & support</span></button>
-          <button className="nav-item"><Settings size={18} /><span>Settings</span></button>
-          <div className="profile-row">
+          <button className="nav-item" onClick={openSettings}><Settings size={18} /><span>Settings</span></button>
+          <div className="profile-row" role="button" tabIndex={0} onClick={openSettings} onKeyDown={(event) => event.key === "Enter" && openSettings()}>
             <div className="profile-avatar">MP</div>
             <span><strong>{currentUser?.full_name ?? "Maya Patel"}</strong><small>{currentUser?.email ?? "maya@northstar.co"}</small></span>
             <ChevronDown size={14} />
@@ -344,6 +388,22 @@ export default function Dashboard() {
             </button>
             <div className="privacy-note"><Check size={14} /><span>Your data is encrypted and used only to explain your business.</span></div>
             <button className="modal-primary" disabled={!fileName} onClick={analyzeFile}>{fileName ? "Analyze this file" : "Choose a file"}</button>
+          </div>
+        </div>
+      )}
+
+      {settingsOpen && (
+        <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSettingsOpen(false)}>
+          <div className="upload-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+            <button className="modal-close" onClick={() => setSettingsOpen(false)} aria-label="Close settings"><X size={18} /></button>
+            <form className="login-card" onSubmit={saveProfile}>
+              <h2 id="settings-title">Profile settings</h2>
+              <p>Keep your Ledgerly account details current.</p>
+              <label>Full name<div className="password-input"><input type="text" required minLength={2} value={profileName} onChange={(event) => setProfileName(event.target.value)} /></div></label>
+              <label>Email address<input type="email" required value={profileEmail} onChange={(event) => setProfileEmail(event.target.value)} /></label>
+              <button className="sign-in-button" disabled={savingProfile}>{savingProfile ? "Saving..." : "Save profile"}</button>
+              <button type="button" className="demo-button" onClick={logout}>Log out</button>
+            </form>
           </div>
         </div>
       )}

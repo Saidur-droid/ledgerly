@@ -16,6 +16,10 @@ export type AuthSession = {
   user: User;
 };
 
+export type UserSettings = {
+  profile: User;
+};
+
 export type UploadRecord = {
   id: number;
   filename: string;
@@ -77,7 +81,7 @@ async function parseError(response: Response) {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function apiFetch(path: string, init: RequestInit = {}) {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
@@ -86,6 +90,17 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       ...init.headers,
     },
   });
+  if (response.status === 401 && accessToken()) {
+    clearSession();
+    if (window.location.pathname !== "/login") {
+      window.location.href = "/login";
+    }
+  }
+  return response;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await apiFetch(path, init);
   if (!response.ok) {
     throw new ApiError(await parseError(response), response.status);
   }
@@ -142,6 +157,18 @@ export function getCurrentUser() {
   return request<User>("/api/v1/me");
 }
 
+export function getSettings() {
+  return request<UserSettings>("/api/v1/settings");
+}
+
+export function updateProfile(profile: Pick<User, "email" | "full_name">) {
+  return request<User>("/api/v1/settings/profile", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile),
+  });
+}
+
 export function listUploads() {
   return request<UploadRecord[]>("/api/v1/uploads");
 }
@@ -165,7 +192,7 @@ export function askBusiness(question: string) {
 }
 
 export async function downloadLatestReport() {
-  const response = await fetch(`${API_URL}/api/v1/reports/latest.pdf`, {
+  const response = await apiFetch("/api/v1/reports/latest.pdf", {
     headers: authHeaders(),
   });
   if (!response.ok) {

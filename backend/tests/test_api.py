@@ -81,3 +81,29 @@ def test_register_login_and_authenticated_session(client):
     )
     assert current_user.status_code == 200
     assert current_user.json()["email"] == credentials["email"]
+
+    settings = client.get(
+        "/api/v1/settings",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert settings.status_code == 200
+    assert settings.json()["profile"]["full_name"] == credentials["full_name"]
+
+    updated_profile = client.patch(
+        "/api/v1/settings/profile",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "email": "updated-founder@example.com",
+            "full_name": "Updated Founder",
+        },
+    )
+    assert updated_profile.status_code == 200
+    assert updated_profile.json()["email"] == "updated-founder@example.com"
+    assert updated_profile.json()["full_name"] == "Updated Founder"
+
+    updated_user = client.get(
+        "/api/v1/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert updated_user.status_code == 200
+    assert updated_user.json()["full_name"] == "Updated Founder"
