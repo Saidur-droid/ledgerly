@@ -8,8 +8,12 @@ from sqlalchemy.pool import StaticPool
 from app.core.config import get_settings
 
 settings = get_settings()
-if settings.database_url.startswith("sqlite:///./"):
-    Path("data").mkdir(parents=True, exist_ok=True)
+if settings.database_url.startswith("sqlite:///") and settings.database_url not in {
+    "sqlite://",
+    "sqlite:///:memory:",
+}:
+    database_path = Path(settings.database_url.removeprefix("sqlite:///"))
+    database_path.parent.mkdir(parents=True, exist_ok=True)
 
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
 engine_options = {"connect_args": connect_args, "pool_pre_ping": True}

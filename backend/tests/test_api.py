@@ -54,3 +54,30 @@ def test_register_and_upload_csv(client):
     assert response.status_code == 201
     assert response.json()["metrics"]["revenue"] == 55842
     assert response.json()["score"] > 0
+
+
+def test_register_login_and_authenticated_session(client):
+    credentials = {
+        "email": "founder@example.com",
+        "full_name": "Ledgerly Founder",
+        "password": "strong-password",
+    }
+    registration = client.post("/api/v1/auth/register", json=credentials)
+    assert registration.status_code == 201
+
+    login = client.post(
+        "/api/v1/auth/login",
+        data={
+            "username": credentials["email"],
+            "password": credentials["password"],
+        },
+    )
+    assert login.status_code == 200
+    token = login.json()["access_token"]
+
+    current_user = client.get(
+        "/api/v1/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert current_user.status_code == 200
+    assert current_user.json()["email"] == credentials["email"]

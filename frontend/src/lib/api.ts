@@ -100,6 +100,34 @@ export function clearSession() {
   window.sessionStorage.removeItem(TOKEN_KEY);
 }
 
+function saveSession(session: AuthSession) {
+  window.sessionStorage.setItem(TOKEN_KEY, session.access_token);
+  return session;
+}
+
+function accountNameFromEmail(email: string) {
+  const localPart = email.split("@", 1)[0] ?? "";
+  const name = localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+  return name || "Ledgerly User";
+}
+
+export async function register(email: string, password: string) {
+  const session = await request<AuthSession>("/api/v1/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email,
+      password,
+      full_name: accountNameFromEmail(email),
+    }),
+  });
+  return saveSession(session);
+}
+
 export async function login(email: string, password: string) {
   const form = new URLSearchParams({ username: email, password });
   const session = await request<AuthSession>("/api/v1/auth/login", {
@@ -107,8 +135,7 @@ export async function login(email: string, password: string) {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: form,
   });
-  window.sessionStorage.setItem(TOKEN_KEY, session.access_token);
-  return session;
+  return saveSession(session);
 }
 
 export function getCurrentUser() {
