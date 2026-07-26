@@ -11,5 +11,3 @@ pypdf==5.8.0
 reportlab==4.4.3
 google-genai==1.28.0
 email-validator==2.2.0
-httpx==0.28.1
-pytest==8.4.1

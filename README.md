@@ -115,7 +115,7 @@ flowchart LR
 cd backend
 python -m venv .venv
 source .venv/bin/activate       # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 cp .env.example .env
 uvicorn app.main:app --reload
 ```
@@ -173,12 +173,15 @@ git config core.hooksPath .githooks
 
 ### Backend · Render
 
-1. Create a Blueprint from this repository; Render detects `render.yaml`.
-2. Set `GEMINI_API_KEY`.
-3. Set `FRONTEND_URL` to the exact Vercel origin.
-4. Deploy and verify `/health`.
+1. In Render, choose **New → Blueprint** and connect `Saidur-droid/ledgerly`.
+2. Confirm Render detects the root-level `render.yaml`.
+3. Enter `CORS_ORIGINS` as the exact Vercel production origin, such as `https://ledgerly.vercel.app`—no path or trailing slash is required. Separate additional trusted origins with commas.
+4. Enter `GEMINI_API_KEY`. Leave it empty only if deterministic fallback explanations are acceptable.
+5. Approve the Starter service and 1 GB persistent disk, then apply the Blueprint.
+6. Wait for the deploy to become live and verify `https://<service>.onrender.com/health` returns `{"status":"healthy","service":"ledgerly-api"}`.
+7. Set the Vercel frontend’s `NEXT_PUBLIC_API_URL` to the Render service origin and redeploy the frontend.
 
-The Blueprint provisions a persistent disk for SQLite. That is appropriate for the MVP; the database boundary is intentionally small so a move to managed Postgres is direct.
+The Blueprint deploys only after GitHub checks pass, generates `SECRET_KEY`, pins Python, binds Uvicorn to Render’s runtime port, and provisions a persistent disk for SQLite. A disk-backed Render service is single-instance and does not receive zero-downtime deploys; that is appropriate for the MVP, and the database boundary is intentionally small so a move to managed Postgres is direct.
 
 ## Security
 

@@ -2,23 +2,32 @@ services:
   - type: web
     name: ledgerly-api
     runtime: python
+    plan: starter
+    region: singapore
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    buildCommand: pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"
     healthCheckPath: /health
+    autoDeployTrigger: checksPass
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.4
       - key: APP_ENV
         value: production
       - key: DATABASE_URL
-        value: sqlite:///./data/ledgerly.db
+        value: sqlite:////opt/render/project/src/backend/data/ledgerly.db
       - key: SECRET_KEY
         generateValue: true
       - key: GEMINI_API_KEY
         sync: false
-      - key: FRONTEND_URL
+      - key: CORS_ORIGINS
         sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: MAX_UPLOAD_MB
+        value: 20
+      - key: ACCESS_TOKEN_MINUTES
+        value: 1440
     disk:
       name: ledgerly-data
       mountPath: /opt/render/project/src/backend/data

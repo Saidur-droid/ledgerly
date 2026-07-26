@@ -4,6 +4,30 @@ def test_health(client):
     assert response.json()["status"] == "healthy"
 
 
+def test_cors_allows_configured_frontend(client):
+    response = client.options(
+        "/api/v1/auth/register",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+def test_cors_rejects_unconfigured_origin(client):
+    response = client.options(
+        "/api/v1/auth/register",
+        headers={
+            "Origin": "https://untrusted.example",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers
+
+
 def test_register_and_upload_csv(client):
     auth = client.post("/api/v1/auth/register", json={
         "email": "maya@example.com",
