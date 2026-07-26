@@ -6,11 +6,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router
 from app.core.config import get_settings
 from app.core.database import Base, engine
+from app.core.migrations import run_postgres_migrations
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    if engine.dialect.name == "postgresql":
+        run_postgres_migrations(engine)
+    else:
+        Base.metadata.create_all(bind=engine)
     yield
 
 

@@ -5,7 +5,7 @@ import yaml
 VERCEL_ORIGIN = "https://ledgerly-one-xi.vercel.app"
 
 
-def test_render_blueprint_is_deployable_without_configuration_prompts():
+def test_render_blueprint_requires_managed_database_secret():
     blueprint_path = Path(__file__).parents[2] / "render.yaml"
     blueprint = yaml.safe_load(blueprint_path.read_text(encoding="utf-8"))
     service = blueprint["services"][0]
@@ -25,8 +25,6 @@ def test_render_blueprint_is_deployable_without_configuration_prompts():
     assert environment["APP_ENV"]["value"] == "production"
     assert environment["SECRET_KEY"]["generateValue"] is True
     assert environment["CORS_ORIGINS"]["value"] == VERCEL_ORIGIN
-    assert not any(item.get("sync") is False for item in service["envVars"])
-
-    database_url = environment["DATABASE_URL"]["value"]
-    assert service["disk"]["mountPath"] in database_url
-    assert service["disk"]["sizeGB"] == 1
+    assert environment["DATABASE_URL"]["sync"] is False
+    assert "value" not in environment["DATABASE_URL"]
+    assert "disk" not in service

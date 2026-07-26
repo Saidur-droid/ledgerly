@@ -15,7 +15,7 @@ services:
       - key: APP_ENV
         value: production
       - key: DATABASE_URL
-        value: sqlite:////opt/render/project/src/backend/data/ledgerly.db
+        sync: false
       - key: SECRET_KEY
         generateValue: true
       - key: CORS_ORIGINS
@@ -26,7 +26,3 @@ services:
         value: 20
       - key: ACCESS_TOKEN_MINUTES
         value: 1440
-    disk:
-      name: ledgerly-data
-      mountPath: /opt/render/project/src/backend/data
-      sizeGB: 1

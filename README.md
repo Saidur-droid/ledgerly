@@ -84,7 +84,7 @@ ledgerly/
 └── render.yaml                 Backend infrastructure definition
 ```
 
-The frontend never owns business calculations. FastAPI coordinates independent domain modules and persists normalized upload history in SQLite. The Gemini adapter receives a deliberately bounded context, never raw global state. Report generation consumes the same Pulse representation returned by the API, preventing dashboard/report drift.
+The frontend never owns business calculations. FastAPI coordinates independent domain modules and persists normalized upload history in Supabase PostgreSQL. The Gemini adapter receives a deliberately bounded context, never raw global state. Report generation consumes the same Pulse representation returned by the API, preventing dashboard/report drift.
 
 ### Core flow
 
@@ -173,9 +173,9 @@ git config core.hooksPath .githooks
 
 ### Backend · Render
 
-Open the [Ledgerly Render Blueprint](https://render.com/deploy?repo=https://github.com/Saidur-droid/ledgerly) and apply it. The Blueprint already contains the production Vercel origin and generates its own signing secret, so the first backend deployment has no environment-variable prompts. Follow the complete [Render deployment checklist](docs/RENDER_DEPLOYMENT.md) to verify health and CORS after launch.
+Open the [Ledgerly Render Blueprint](https://render.com/deploy?repo=https://github.com/Saidur-droid/ledgerly) and apply it. The Blueprint contains the production Vercel origin, generates its signing secret, and asks for the Supabase PostgreSQL `DATABASE_URL`. Follow the complete [Render deployment checklist](docs/RENDER_DEPLOYMENT.md) to verify health and CORS after launch.
 
-The Blueprint deploys only after GitHub checks pass, generates `SECRET_KEY`, pins Python, binds Uvicorn to Render’s runtime port, allows exactly `https://ledgerly-one-xi.vercel.app`, and provisions a persistent disk for SQLite. Gemini can be enabled later with `GEMINI_API_KEY`; without it, the safe deterministic explanation fallback remains active. A disk-backed Render service is single-instance and does not receive zero-downtime deploys; that is appropriate for the MVP, and the database boundary is intentionally small so a move to managed Postgres is direct.
+The Blueprint deploys only after GitHub checks pass, generates `SECRET_KEY`, pins Python, binds Uvicorn to Render’s runtime port, and allows exactly `https://ledgerly-one-xi.vercel.app`. Versioned SQL migrations run at API startup, so no Supabase CLI is required. Gemini can be enabled later with `GEMINI_API_KEY`; without it, the safe deterministic explanation fallback remains active. See [Supabase PostgreSQL operations](docs/SUPABASE_POSTGRES.md).
 
 ## Security
 
@@ -191,10 +191,10 @@ Before handling sensitive production data, add malware scanning, object storage 
 
 ## Scalability
 
-The MVP starts with SQLite because it minimizes operational surface while product usage is being learned. Growth does not require a rewrite:
+Ledgerly stores production data in managed Supabase PostgreSQL while retaining SQLite for zero-setup local development:
 
 1. Move file bytes to S3-compatible object storage.
-2. Replace SQLite with Postgres via the SQLAlchemy boundary.
+2. Apply versioned SQL migrations automatically at API startup.
 3. Queue parsing and report generation as background jobs.
 4. Store semantic business context separately from raw rows.
 5. Add organization membership and role-based authorization.
@@ -227,8 +227,8 @@ Ledgerly returns a lower confidence score and exposes the detection gap instead 
 </details>
 
 <details>
-<summary><strong>Why SQLite?</strong></summary>
-It is fast, durable, inexpensive, and operationally simple for an early product. Persistence is isolated behind SQLAlchemy so Postgres is a deployment evolution, not a product rewrite.
+<summary><strong>Why SQLite locally and PostgreSQL in production?</strong></summary>
+SQLite keeps local development frictionless. Supabase PostgreSQL gives production durable managed storage, concurrent access, backups, and a clear scaling path behind the same SQLAlchemy boundary.
 </details>
 
 <details>
