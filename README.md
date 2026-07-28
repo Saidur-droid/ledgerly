@@ -145,13 +145,19 @@ irm https://ai.snowflake.com/static/cc-scripts/install.ps1 | iex
 cortex --version
 ```
 
-Run `cortex`, create a connection named `ledgerly`, and select the Ledgerly project directory. Then let CoCo create and verify the warehouse objects:
+Copy the two profiles from `snowflake/connections.toml.example`. Use the
+bootstrap profile once to create the Ledgerly objects:
 
 ```bash
-cortex -c ledgerly -w . -f snowflake/coco-bootstrap.prompt
+cortex -c ledgerly-bootstrap -w . -f snowflake/coco-bootstrap.prompt
 ```
 
-Copy the Snowflake values from `backend/.env.example` into `backend/.env`. Credentials are never committed. The full connection, role, SQL, and troubleshooting walkthrough is in [Snowflake + CoCo setup](docs/SNOWFLAKE_COCO.md).
+After granting `LEDGERLY_APP_ROLE`, use the least-privilege `ledgerly`
+connection for verification and the demo. Copy the Snowflake values from
+`backend/.env.example` into `backend/.env`. Credentials are never committed.
+The full connection, activation, migration boundary, rollback, and
+troubleshooting walkthrough is in
+[Snowflake + CoCo setup](docs/SNOWFLAKE_COCO.md).
 
 PostgreSQL is the default:
 
@@ -200,6 +206,9 @@ git config core.hooksPath .githooks
 5. Ask a question in Talk to your Business; the context comes from the latest Snowflake upload and Pulse.
 6. Export the PDF; it uses the same Snowflake-backed Pulse shown on the dashboard.
 7. Run `snowflake/verify.sql` to show the complete per-user lineage.
+
+See [CoCo judge demo](docs/COCO_DEMO.md) for the exact commands, proof points,
+and five-minute presentation storyline.
 
 ## API surface
 
