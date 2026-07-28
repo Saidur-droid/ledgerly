@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from app.business_engine.storage import (
+    BusinessStore,
     PostgreSQLBusinessStore,
     SnowflakeBusinessStore,
     StoredPulse,
@@ -18,6 +19,29 @@ def snowflake_settings() -> Settings:
         snowflake_password="secret",
         snowflake_role="LEDGERLY_ROLE",
     )
+
+
+def test_storage_adapters_implement_the_complete_business_store_contract():
+    required_methods = {
+        name
+        for name, member in BusinessStore.__dict__.items()
+        if callable(member) and not name.startswith("_")
+    }
+
+    assert required_methods == {
+        "create_upload",
+        "get_metrics",
+        "save_pulse",
+        "list_uploads",
+        "latest_context",
+        "previous_pulse",
+        "rollback",
+        "close",
+    }
+    for adapter in (PostgreSQLBusinessStore, SnowflakeBusinessStore):
+        assert required_methods <= {
+            name for name in dir(adapter) if callable(getattr(adapter, name))
+        }
 
 
 def test_provider_switch_defaults_to_postgres():
