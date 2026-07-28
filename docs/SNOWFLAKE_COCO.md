@@ -1,9 +1,9 @@
 # Snowflake + CoCo deployment
 
-Ledgerly uses Snowflake for business uploads, detected KPI values, and Business
-Pulse history. Authentication is deliberately unchanged. The API automatically
-selects Snowflake when its complete credential set is present, so the migration
-can be activated without a frontend release or API contract change.
+Ledgerly can use Snowflake for business uploads, detected KPI values, and
+Business Pulse history. Authentication is deliberately unchanged. PostgreSQL is
+the production default; Snowflake is selected explicitly through
+`STORAGE_PROVIDER` without a frontend release or API contract change.
 
 ## 1. Install and connect CoCo CLI
 
@@ -51,6 +51,7 @@ GRANT ROLE LEDGERLY_APP_ROLE TO USER "<service-user>";
 Set these Render environment variables:
 
 ```text
+STORAGE_PROVIDER=snowflake
 SNOWFLAKE_ACCOUNT=<organization-account>
 SNOWFLAKE_USER=<service-user>
 SNOWFLAKE_PASSWORD=<service-user-password>
@@ -74,7 +75,8 @@ The response must contain:
 {"status":"healthy","service":"ledgerly-api","business_storage":"snowflake"}
 ```
 
-If it reports `database`, one or more required Snowflake values is absent.
+If it reports `postgres`, verify `STORAGE_PROVIDER=snowflake` and the complete
+Snowflake credential set, then redeploy.
 
 ## 4. Verify the data path
 
@@ -106,7 +108,7 @@ and commits the Pulse in the same transaction.
 
 | Symptom | Check |
 | --- | --- |
-| `/health` says `database` | Complete all six required Snowflake values and redeploy |
+| `/health` says `postgres` | Set `STORAGE_PROVIDER=snowflake`, complete all required Snowflake values, and redeploy |
 | Login fails | `DATABASE_URL` and `SECRET_KEY`; auth does not use Snowflake |
 | Upload returns 503 | Snowflake account, role grants, warehouse, database, and schema |
 | Pulse returns 404 | The authenticated user has no completed Snowflake upload |

@@ -74,7 +74,7 @@ ledgerly/
 ├── backend/
 │   ├── app/api/                Versioned HTTP interface
 │   ├── app/ai/                 Gemini adapter and safety policy
-│   ├── app/business_engine/    Parsing, KPI detection, Snowflake storage
+│   ├── app/business_engine/    Parsing, KPI detection, storage adapters
 │   ├── app/business_pulse/     Explainable scoring and comparison
 │   ├── app/report_engine/      PDF generation
 │   ├── app/core/               Configuration, database, security
@@ -85,7 +85,17 @@ ledgerly/
 └── render.yaml                 Backend infrastructure definition
 ```
 
-The frontend never owns business calculations. FastAPI preserves the existing authentication boundary, while Snowflake owns normalized uploads, detected metrics, and Pulse history. The Business Pulse engine scores metrics only after reading them back from Snowflake. Chat, dashboard memory, and PDF reporting consume that same warehouse-backed Pulse representation, preventing product surfaces from drifting apart.
+The frontend never owns business calculations. FastAPI preserves the existing JWT and Supabase PostgreSQL authentication boundary. Business-data operations depend on one storage interface, so API routes and domain engines do not know which provider is active.
+
+```text
+Ledgerly API
+     │
+Business Storage Adapter
+     ├── PostgreSQL  (current production)
+     └── Snowflake   (hackathon analytics, connection-ready)
+```
+
+PostgreSQL remains the explicit default. Selecting Snowflake changes only the adapter: uploads, metrics, historical context, and Pulse results use the Snowflake table mappings without changing authentication, frontend code, or API contracts.
 
 ### Core flow
 
@@ -93,17 +103,16 @@ The frontend never owns business calculations. FastAPI preserves the existing au
 flowchart LR
   A[Sign in] --> B[Upload business file]
   B --> C[Parse and normalize]
-  C --> D[(Snowflake UPLOADS)]
-  C --> E[(Snowflake BUSINESS_METRICS)]
-  E --> F[Query metrics from Snowflake]
-  F --> G[Business Pulse]
-  G --> H[(Snowflake PULSE_HISTORY)]
-  H --> I[Dashboard and Memory]
-  H --> J[AI Insights]
-  H --> K[PDF Report]
+  C --> D[Business Storage Adapter]
+  D --> E[(PostgreSQL)]
+  D --> F[(Snowflake)]
+  D --> G[Business Pulse]
+  G --> H[Dashboard and Memory]
+  G --> I[AI Insights]
+  G --> J[PDF Report]
 ```
 
-This lineage is intentional and testable: **CSV upload → Snowflake insert → Snowflake query → Business Pulse → AI insights → dashboard → PDF report**.
+With `STORAGE_PROVIDER=snowflake`, the hackathon lineage is: **CSV upload → Snowflake insert → Snowflake query → Business Pulse → AI insights → dashboard → PDF report**.
 
 ## Developer setup
 
@@ -112,7 +121,7 @@ This lineage is intentional and testable: **CSV upload → Snowflake insert → 
 - Node.js 22+
 - Python 3.12+
 - npm 10+
-- A Snowflake account and the Snowflake Cortex Code (CoCo) CLI for the warehouse-backed flow
+- Optionally, a Snowflake account and CoCo CLI when testing the Snowflake adapter
 
 ### 1. Configure the API
 
@@ -143,6 +152,18 @@ cortex -c ledgerly -w . -f snowflake/coco-bootstrap.prompt
 ```
 
 Copy the Snowflake values from `backend/.env.example` into `backend/.env`. Credentials are never committed. The full connection, role, SQL, and troubleshooting walkthrough is in [Snowflake + CoCo setup](docs/SNOWFLAKE_COCO.md).
+
+PostgreSQL is the default:
+
+```text
+STORAGE_PROVIDER=postgres
+```
+
+To activate the prepared Snowflake adapter, provide its credentials and set:
+
+```text
+STORAGE_PROVIDER=snowflake
+```
 
 ### 3. Start the product
 
@@ -209,7 +230,7 @@ Open the [Ledgerly Render Blueprint](https://render.com/deploy?repo=https://gith
 
 The Blueprint deploys only after GitHub checks pass, generates `SECRET_KEY`, pins Python, binds Uvicorn to Render’s runtime port, and allows exactly `https://ledgerly-one-xi.vercel.app`. Versioned SQL migrations run at API startup, so no Supabase CLI is required. Gemini can be enabled later with `GEMINI_API_KEY`; without it, the safe deterministic explanation fallback remains active. See [Supabase PostgreSQL operations](docs/SUPABASE_POSTGRES.md).
 
-Add `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, and `SNOWFLAKE_PASSWORD` as Render secrets. The Blueprint supplies the warehouse, database, and schema names. Ledgerly activates Snowflake only when the full credential set exists, allowing a no-downtime deployment before secret provisioning. Confirm activation at `/health`: `business_storage` must read `snowflake`.
+Render explicitly sets `STORAGE_PROVIDER=postgres`, preserving current production. To activate Snowflake later, add `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, and `SNOWFLAKE_PASSWORD`, then change `STORAGE_PROVIDER` to `snowflake`. The Blueprint supplies the warehouse, database, schema, and role names. Confirm the selected adapter at `/health`.
 
 ## Security
 
@@ -225,7 +246,7 @@ Before handling sensitive production data, add malware scanning, object storage 
 
 ## Scalability
 
-Ledgerly separates operational identity data from analytical business data. Snowflake scales uploads, metric history, and Pulse queries independently, while the compatibility storage path keeps local development frictionless:
+Ledgerly separates operational identity data from its provider-neutral business-data interface. PostgreSQL remains production-safe today; Snowflake can scale uploads, metric history, and Pulse queries when explicitly selected:
 
 1. Move file bytes to S3-compatible object storage.
 2. Apply versioned SQL migrations automatically at API startup.
