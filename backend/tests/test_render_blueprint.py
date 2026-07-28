@@ -27,4 +27,5 @@ def test_render_blueprint_requires_managed_database_secret():
     assert environment["CORS_ORIGINS"]["value"] == VERCEL_ORIGIN
     assert environment["DATABASE_URL"]["sync"] is False
     assert "value" not in environment["DATABASE_URL"]
+    assert environment["STORAGE_PROVIDER"]["value"] == "postgres"
     assert "disk" not in service

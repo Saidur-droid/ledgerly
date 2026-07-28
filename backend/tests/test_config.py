@@ -12,6 +12,26 @@ def test_cors_origins_are_normalized():
     ]
 
 
+def test_postgres_is_the_default_storage_provider():
+    assert Settings().storage_provider == "postgres"
+
+
+def test_snowflake_provider_requires_complete_credentials():
+    with pytest.raises(ValidationError, match="Snowflake storage requires"):
+        Settings(storage_provider="snowflake")
+
+
+def test_snowflake_provider_accepts_complete_credentials():
+    settings = Settings(
+        storage_provider="snowflake",
+        snowflake_account="organization-account",
+        snowflake_user="ledgerly_service",
+        snowflake_password="token",
+    )
+    assert settings.storage_provider == "snowflake"
+    assert settings.snowflake_configured
+
+
 def test_production_rejects_default_secret():
     with pytest.raises(ValidationError, match="SECRET_KEY"):
         Settings(

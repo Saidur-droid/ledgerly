@@ -40,5 +40,5 @@ def health() -> dict[str, str]:
     return {
         "status": "healthy",
         "service": "ledgerly-api",
-        "business_storage": "snowflake" if settings.snowflake_configured else "database",
+        "business_storage": settings.storage_provider,
     }

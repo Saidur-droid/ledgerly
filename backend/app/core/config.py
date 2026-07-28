@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,6 +18,7 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     max_upload_mb: int = 20
     access_token_minutes: int = 60 * 24
+    storage_provider: Literal["postgres", "snowflake"] = "postgres"
     snowflake_account: str = ""
     snowflake_user: str = ""
     snowflake_password: str = ""
@@ -49,6 +51,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":
+        if self.storage_provider == "snowflake" and not self.snowflake_configured:
+            raise ValueError(
+                "Snowflake storage requires SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, "
+                "SNOWFLAKE_PASSWORD, SNOWFLAKE_WAREHOUSE, SNOWFLAKE_DATABASE, "
+                "and SNOWFLAKE_SCHEMA."
+            )
         if self.app_env.lower() != "production":
             return self
         if self.secret_key == DEVELOPMENT_SECRET or len(self.secret_key) < 32:

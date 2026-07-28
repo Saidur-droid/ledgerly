@@ -26,6 +26,8 @@ services:
         value: 20
       - key: ACCESS_TOKEN_MINUTES
         value: 1440
+      - key: STORAGE_PROVIDER
+        value: postgres
       - key: SNOWFLAKE_ACCOUNT
         sync: false
       - key: SNOWFLAKE_USER

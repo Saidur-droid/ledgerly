@@ -1,17 +1,45 @@
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
-from app.business_engine.storage import SnowflakeBusinessStore, StoredPulse
+from app.business_engine.storage import (
+    PostgreSQLBusinessStore,
+    SnowflakeBusinessStore,
+    StoredPulse,
+    get_business_store,
+)
 from app.core.config import Settings
 
 
 def snowflake_settings() -> Settings:
     return Settings(
+        storage_provider="snowflake",
         snowflake_account="acme-org",
         snowflake_user="ledgerly_service",
         snowflake_password="secret",
         snowflake_role="LEDGERLY_ROLE",
     )
+
+
+def test_provider_switch_defaults_to_postgres():
+    generator = get_business_store(MagicMock(), Settings())
+    store = next(generator)
+    try:
+        assert isinstance(store, PostgreSQLBusinessStore)
+        assert store.backend_name == "postgres"
+    finally:
+        generator.close()
+
+
+@patch("snowflake.connector.connect")
+def test_provider_switch_selects_snowflake(connect: MagicMock):
+    generator = get_business_store(MagicMock(), snowflake_settings())
+    store = next(generator)
+    try:
+        assert isinstance(store, SnowflakeBusinessStore)
+        assert store.backend_name == "snowflake"
+        connect.assert_called_once()
+    finally:
+        generator.close()
 
 
 @patch("snowflake.connector.connect")

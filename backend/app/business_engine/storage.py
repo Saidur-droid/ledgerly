@@ -93,10 +93,10 @@ def _pulse_from_model(pulse: Pulse) -> StoredPulse:
     )
 
 
-class SqlAlchemyBusinessStore:
-    """Compatibility path used until Snowflake credentials are configured."""
+class PostgreSQLBusinessStore:
+    """Current production adapter backed by the existing SQLAlchemy database."""
 
-    backend_name = "database"
+    backend_name = "postgres"
 
     def __init__(self, session: Session):
         self.session = session
@@ -418,10 +418,10 @@ def get_business_store(
     settings: Settings = Depends(get_settings),
 ) -> Iterator[BusinessStore]:
     store: BusinessStore
-    if settings.snowflake_configured:
+    if settings.storage_provider == "snowflake":
         store = SnowflakeBusinessStore(settings)
     else:
-        store = SqlAlchemyBusinessStore(db)
+        store = PostgreSQLBusinessStore(db)
     try:
         yield store
     finally:
