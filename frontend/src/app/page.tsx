@@ -105,6 +105,8 @@ export default function Dashboard() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [uploadCount, setUploadCount] = useState(6);
   const [livePulse, setLivePulse] = useState<Pulse | null>(null);
+  const [authenticatedSession, setAuthenticatedSession] = useState(false);
+  const [businessDataLoaded, setBusinessDataLoaded] = useState(false);
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([
     {
@@ -119,17 +121,32 @@ export default function Dashboard() {
   );
 
   useEffect(() => {
-    if (!hasSession()) return;
+    if (!hasSession()) {
+      setBusinessDataLoaded(true);
+      return;
+    }
+    setAuthenticatedSession(true);
     void Promise.allSettled([
       getCurrentUser(),
       listUploads(),
       getLatestPulse(),
     ]).then(([userResult, uploadsResult, pulseResult]) => {
       if (userResult.status === "fulfilled") setCurrentUser(userResult.value);
-      if (uploadsResult.status === "fulfilled") setUploadCount(uploadsResult.value.length);
+      if (uploadsResult.status === "fulfilled") {
+        setUploadCount(uploadsResult.value.length);
+        if (uploadsResult.value.length === 0) {
+          setMessages([{
+            role: "assistant",
+            text: "Upload your first business file, then ask me to explain its revenue, expenses, margins, or trends.",
+          }]);
+        }
+      }
       if (pulseResult.status === "fulfilled") setLivePulse(pulseResult.value);
+      setBusinessDataLoaded(true);
     });
   }, []);
+
+  const authenticatedEmpty = authenticatedSession && businessDataLoaded && uploadCount === 0;
 
   async function openSettings() {
     if (!hasSession()) {
@@ -253,9 +270,9 @@ export default function Dashboard() {
 
         <div className="sidebar-bottom">
           <div className="pulse-mini">
-            <div className="pulse-mini-top"><Zap size={15} fill="currentColor" /><span>Business Pulse™</span><strong>86</strong></div>
-            <div className="progress-track"><span style={{ width: "86%" }} /></div>
-            <small>Strong · Updated today</small>
+            <div className="pulse-mini-top"><Zap size={15} fill="currentColor" /><span>Business Pulse™</span><strong>{authenticatedEmpty ? "—" : (livePulse?.score ?? 86)}</strong></div>
+            <div className="progress-track"><span style={{ width: authenticatedEmpty ? "0%" : `${livePulse?.score ?? 86}%` }} /></div>
+            <small>{authenticatedEmpty ? "Waiting for your first upload" : "Strong · Updated today"}</small>
           </div>
           <button className="nav-item"><CircleHelp size={18} /><span>Help & support</span></button>
           <button className="nav-item" onClick={openSettings}><Settings size={18} /><span>Settings</span></button>
@@ -293,6 +310,20 @@ export default function Dashboard() {
             </div>
           </section>
 
+          {authenticatedEmpty ? (
+            <section className="pulse-card">
+              <div className="pulse-score">
+                <div className="memory-icon"><CloudUpload size={22} /></div>
+                <div><p>BUSINESS PULSE™</p><h2>Upload your first business file</h2></div>
+              </div>
+              <div className="pulse-copy">
+                <Sparkles size={18} />
+                <p>Ledgerly will detect your metrics, build an explainable Business Pulse, and remember each upload.</p>
+              </div>
+              <button onClick={() => setUploadOpen(true)}>Add data <ArrowUpRight size={15} /></button>
+            </section>
+          ) : (
+          <>
           <section className="pulse-card">
             <div className="pulse-score">
               <div className="score-ring"><span>{livePulse?.score ?? 86}</span><small>/100</small></div>
@@ -368,6 +399,8 @@ export default function Dashboard() {
               <button onClick={() => setUploadOpen(true)}><Upload size={15} />Upload new data</button>
             </article>
           </section>
+          </>
+          )}
         </div>
       </main>
 
