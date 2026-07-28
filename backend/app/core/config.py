@@ -59,6 +59,8 @@ class Settings(BaseSettings):
             )
         if self.app_env.lower() != "production":
             return self
+        if self.database_url.startswith("sqlite"):
+            raise ValueError("DATABASE_URL must use PostgreSQL in production.")
         if self.secret_key == DEVELOPMENT_SECRET or len(self.secret_key) < 32:
             raise ValueError("SECRET_KEY must be a unique value of at least 32 characters in production.")
         if not self.allowed_origins:
