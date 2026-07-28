@@ -1,0 +1,5 @@
+Read snowflake/setup.sql and execute its statements against the current Snowflake
+connection in order. Do not modify application code. After setup, run
+snowflake/verify.sql. Report the active role, warehouse, database, schema, the
+three Ledgerly tables, and their row counts. Stop and report the exact missing
+privilege if any statement is denied.

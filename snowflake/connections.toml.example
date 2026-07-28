@@ -1,0 +1,11 @@
+# Copy this connection into ~/.snowflake/connections.toml.
+# Prefer browser SSO for local CoCo usage; never commit credentials or tokens.
+
+[ledgerly]
+account = "<organization-account>"
+user = "<username>"
+authenticator = "externalbrowser"
+warehouse = "LEDGERLY_WH"
+database = "LEDGERLY"
+schema = "BUSINESS"
+role = "LEDGERLY_APP_ROLE"

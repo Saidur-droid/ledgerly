@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     snowflake_warehouse: str = "LEDGERLY_WH"
     snowflake_database: str = "LEDGERLY"
     snowflake_schema: str = "BUSINESS"
-    snowflake_role: str = ""
+    snowflake_role: str = "LEDGERLY_APP_ROLE"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

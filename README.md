@@ -74,17 +74,18 @@ ledgerly/
 ├── backend/
 │   ├── app/api/                Versioned HTTP interface
 │   ├── app/ai/                 Gemini adapter and safety policy
-│   ├── app/business_engine/    Parsing, normalization, KPI detection
+│   ├── app/business_engine/    Parsing, KPI detection, Snowflake storage
 │   ├── app/business_pulse/     Explainable scoring and comparison
 │   ├── app/report_engine/      PDF generation
 │   ├── app/core/               Configuration, database, security
 │   └── tests/                  API, parser, and scoring tests
+├── snowflake/                  CoCo bootstrap, warehouse DDL, verification
 ├── .github/workflows/          Deployability gates
 ├── docker-compose.yml          Local full-stack environment
 └── render.yaml                 Backend infrastructure definition
 ```
 
-The frontend never owns business calculations. FastAPI coordinates independent domain modules and persists normalized upload history in Supabase PostgreSQL. The Gemini adapter receives a deliberately bounded context, never raw global state. Report generation consumes the same Pulse representation returned by the API, preventing dashboard/report drift.
+The frontend never owns business calculations. FastAPI preserves the existing authentication boundary, while Snowflake owns normalized uploads, detected metrics, and Pulse history. The Business Pulse engine scores metrics only after reading them back from Snowflake. Chat, dashboard memory, and PDF reporting consume that same warehouse-backed Pulse representation, preventing product surfaces from drifting apart.
 
 ### Core flow
 
@@ -92,14 +93,17 @@ The frontend never owns business calculations. FastAPI coordinates independent d
 flowchart LR
   A[Sign in] --> B[Upload business file]
   B --> C[Parse and normalize]
-  C --> D[Detect KPIs]
-  D --> E[Business Pulse]
-  E --> F[Dashboard]
-  E --> G[Business Memory]
-  E --> H[Ask Ledgerly]
-  E --> I[PDF report]
-  G --> E
+  C --> D[(Snowflake UPLOADS)]
+  C --> E[(Snowflake BUSINESS_METRICS)]
+  E --> F[Query metrics from Snowflake]
+  F --> G[Business Pulse]
+  G --> H[(Snowflake PULSE_HISTORY)]
+  H --> I[Dashboard and Memory]
+  H --> J[AI Insights]
+  H --> K[PDF Report]
 ```
+
+This lineage is intentional and testable: **CSV upload → Snowflake insert → Snowflake query → Business Pulse → AI insights → dashboard → PDF report**.
 
 ## Developer setup
 
@@ -108,6 +112,7 @@ flowchart LR
 - Node.js 22+
 - Python 3.12+
 - npm 10+
+- A Snowflake account and the Snowflake Cortex Code (CoCo) CLI for the warehouse-backed flow
 
 ### 1. Configure the API
 
@@ -122,7 +127,24 @@ uvicorn app.main:app --reload
 
 Add a Gemini API key to `backend/.env` to enable generated explanations. Without one, Ledgerly remains functional and returns deterministic, data-grounded summaries.
 
-### 2. Start the product
+### 2. Bootstrap Snowflake with CoCo CLI
+
+Install CoCo on Windows:
+
+```powershell
+irm https://ai.snowflake.com/static/cc-scripts/install.ps1 | iex
+cortex --version
+```
+
+Run `cortex`, create a connection named `ledgerly`, and select the Ledgerly project directory. Then let CoCo create and verify the warehouse objects:
+
+```bash
+cortex -c ledgerly -w . -f snowflake/coco-bootstrap.prompt
+```
+
+Copy the Snowflake values from `backend/.env.example` into `backend/.env`. Credentials are never committed. The full connection, role, SQL, and troubleshooting walkthrough is in [Snowflake + CoCo setup](docs/SNOWFLAKE_COCO.md).
+
+### 3. Start the product
 
 ```bash
 cd frontend
@@ -133,7 +155,7 @@ npm run dev
 
 Open `http://localhost:3000`. API documentation is available at `http://localhost:8000/docs`.
 
-### 3. Verify the deployable state
+### 4. Verify the deployable state
 
 ```bash
 npm --prefix frontend run lint
@@ -147,6 +169,16 @@ Git hooks can enforce the same checks before every commit:
 ```bash
 git config core.hooksPath .githooks
 ```
+
+### Hackathon demo flow
+
+1. Register or sign in; authentication remains isolated from business storage.
+2. Upload `CSV`, `XLSX`, `PDF`, or `JSON` business data.
+3. Show `LEDGERLY.BUSINESS.UPLOADS` and `BUSINESS_METRICS` in Snowsight or CoCo.
+4. Open Business Pulse™; its metrics were queried back from Snowflake before scoring.
+5. Ask a question in Talk to your Business; the context comes from the latest Snowflake upload and Pulse.
+6. Export the PDF; it uses the same Snowflake-backed Pulse shown on the dashboard.
+7. Run `snowflake/verify.sql` to show the complete per-user lineage.
 
 ## API surface
 
@@ -177,6 +209,8 @@ Open the [Ledgerly Render Blueprint](https://render.com/deploy?repo=https://gith
 
 The Blueprint deploys only after GitHub checks pass, generates `SECRET_KEY`, pins Python, binds Uvicorn to Render’s runtime port, and allows exactly `https://ledgerly-one-xi.vercel.app`. Versioned SQL migrations run at API startup, so no Supabase CLI is required. Gemini can be enabled later with `GEMINI_API_KEY`; without it, the safe deterministic explanation fallback remains active. See [Supabase PostgreSQL operations](docs/SUPABASE_POSTGRES.md).
 
+Add `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, and `SNOWFLAKE_PASSWORD` as Render secrets. The Blueprint supplies the warehouse, database, and schema names. Ledgerly activates Snowflake only when the full credential set exists, allowing a no-downtime deployment before secret provisioning. Confirm activation at `/health`: `business_storage` must read `snowflake`.
+
 ## Security
 
 - Passwords use Argon2; plaintext passwords are never stored.
@@ -191,7 +225,7 @@ Before handling sensitive production data, add malware scanning, object storage 
 
 ## Scalability
 
-Ledgerly stores production data in managed Supabase PostgreSQL while retaining SQLite for zero-setup local development:
+Ledgerly separates operational identity data from analytical business data. Snowflake scales uploads, metric history, and Pulse queries independently, while the compatibility storage path keeps local development frictionless:
 
 1. Move file bytes to S3-compatible object storage.
 2. Apply versioned SQL migrations automatically at API startup.
@@ -227,8 +261,8 @@ Ledgerly returns a lower confidence score and exposes the detection gap instead 
 </details>
 
 <details>
-<summary><strong>Why SQLite locally and PostgreSQL in production?</strong></summary>
-SQLite keeps local development frictionless. Supabase PostgreSQL gives production durable managed storage, concurrent access, backups, and a clear scaling path behind the same SQLAlchemy boundary.
+<summary><strong>How do I know the app is using Snowflake?</strong></summary>
+Call `/health` and verify `business_storage` is `snowflake`. Then run `snowflake/verify.sql`; each upload should have metric rows and a matching Pulse record.
 </details>
 
 <details>

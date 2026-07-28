@@ -39,4 +39,4 @@ services:
       - key: SNOWFLAKE_SCHEMA
         value: BUSINESS
       - key: SNOWFLAKE_ROLE
-        sync: false
+        value: LEDGERLY_APP_ROLE
