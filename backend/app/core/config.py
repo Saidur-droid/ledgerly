@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     max_upload_mb: int = 20
     access_token_minutes: int = 60 * 24
+    snowflake_account: str = ""
+    snowflake_user: str = ""
+    snowflake_password: str = ""
+    snowflake_warehouse: str = "LEDGERLY_WH"
+    snowflake_database: str = "LEDGERLY"
+    snowflake_schema: str = "BUSINESS"
+    snowflake_role: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -26,6 +33,19 @@ class Settings(BaseSettings):
         if self.app_env.lower() == "production" and PRODUCTION_FRONTEND_ORIGIN not in origins:
             origins.append(PRODUCTION_FRONTEND_ORIGIN)
         return origins
+
+    @property
+    def snowflake_configured(self) -> bool:
+        return all(
+            (
+                self.snowflake_account,
+                self.snowflake_user,
+                self.snowflake_password,
+                self.snowflake_warehouse,
+                self.snowflake_database,
+                self.snowflake_schema,
+            )
+        )
 
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":
