@@ -9,11 +9,17 @@ from sqlalchemy.orm import Session
 
 from app.ai.service import DISCLAIMER, answer_business_question
 from app.business_engine.parser import parse_business_file
+from app.business_engine.storage import (
+    BusinessStore,
+    StoredPulse,
+    StoredUpload,
+    get_business_store,
+)
 from app.business_pulse.engine import calculate_pulse, compare_metrics
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import create_access_token, get_current_user, hash_password, verify_password
-from app.models import Pulse, Upload, User
+from app.models import User
 from app.report_engine.pdf import build_pulse_report
 from app.schemas import (
     ChatRequest,
@@ -87,7 +93,7 @@ def update_profile(
 async def upload_business_data(
     file: UploadFile = File(...),
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    store: BusinessStore = Depends(get_business_store),
 ) -> PulseRead:
     content = await file.read()
     limit = get_settings().max_upload_mb * 1024 * 1024
@@ -98,56 +104,73 @@ async def upload_business_data(
     except (ValueError, TypeError) as error:
         raise HTTPException(status_code=400, detail=str(error))
 
-    previous = db.scalar(select(Upload).where(Upload.user_id == user.id).order_by(Upload.created_at.desc()))
-    pulse_result = calculate_pulse(parsed.metrics, parsed.confidence)
-    upload = Upload(
-        user_id=user.id,
-        filename=file.filename or "upload",
-        file_type=(file.filename or "").rsplit(".", 1)[-1].lower(),
-        checksum=hashlib.sha256(content).hexdigest(),
-        row_count=len(parsed.records),
-        confidence=parsed.confidence,
-        normalized_data={"columns": parsed.columns, "records": parsed.records, "warnings": parsed.warnings},
-    )
-    db.add(upload)
-    db.flush()
-    pulse = Pulse(
-        upload_id=upload.id,
-        score=pulse_result.score,
-        confidence=pulse_result.confidence,
-        summary=pulse_result.summary,
-        factors=pulse_result.factors,
-        metrics=pulse_result.metrics,
-    )
-    db.add(pulse)
-    db.commit()
+    try:
+        upload = store.create_upload(
+            user_id=user.id,
+            filename=file.filename or "upload",
+            file_type=(file.filename or "").rsplit(".", 1)[-1].lower(),
+            checksum=hashlib.sha256(content).hexdigest(),
+            row_count=len(parsed.records),
+            confidence=parsed.confidence,
+            normalized_data={
+                "columns": parsed.columns,
+                "records": parsed.records,
+                "warnings": parsed.warnings,
+            },
+            metrics=parsed.metrics,
+        )
+        warehouse_metrics = store.get_metrics(user_id=user.id, upload_id=upload.id)
+        previous = store.previous_pulse(user_id=user.id, upload_id=upload.id)
+        pulse_result = calculate_pulse(warehouse_metrics, upload.confidence)
+        pulse = StoredPulse(
+            upload_id=upload.id,
+            score=pulse_result.score,
+            confidence=pulse_result.confidence,
+            summary=pulse_result.summary,
+            factors=pulse_result.factors,
+            metrics=pulse_result.metrics,
+        )
+        store.save_pulse(user_id=user.id, pulse=pulse)
+    except Exception as error:
+        store.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Business data storage is temporarily unavailable.",
+        ) from error
     return PulseRead(
         score=pulse.score,
         confidence=pulse.confidence,
         summary=pulse.summary,
         factors=pulse.factors,
         metrics=pulse.metrics,
-        comparison=compare_metrics(pulse.metrics, previous.pulse.metrics if previous and previous.pulse else None),
+        comparison=compare_metrics(pulse.metrics, previous.metrics if previous else None),
     )
 
 
 @router.get("/uploads", response_model=list[UploadRead])
-def list_uploads(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[Upload]:
-    return list(db.scalars(select(Upload).where(Upload.user_id == user.id).order_by(Upload.created_at.desc())).all())
+def list_uploads(
+    user: User = Depends(get_current_user),
+    store: BusinessStore = Depends(get_business_store),
+) -> list[StoredUpload]:
+    return store.list_uploads(user_id=user.id)
 
 
-def latest_pulse(user_id: int, db: Session) -> tuple[Upload, Pulse]:
-    upload = db.scalar(select(Upload).where(Upload.user_id == user_id).order_by(Upload.created_at.desc()))
-    if upload is None or upload.pulse is None:
+def latest_pulse(user_id: int, store: BusinessStore) -> tuple[StoredUpload, StoredPulse]:
+    context = store.latest_context(user_id=user_id)
+    if context is None:
         raise HTTPException(status_code=404, detail="Upload business data first.")
-    return upload, upload.pulse
+    return context
 
 
 @router.get("/pulse/latest", response_model=PulseRead)
-def read_latest_pulse(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> PulseRead:
-    upload, pulse = latest_pulse(user.id, db)
-    previous = db.scalar(
-        select(Upload).where(Upload.user_id == user.id, Upload.id != upload.id).order_by(Upload.created_at.desc())
+def read_latest_pulse(
+    user: User = Depends(get_current_user),
+    store: BusinessStore = Depends(get_business_store),
+) -> PulseRead:
+    upload, pulse = latest_pulse(user.id, store)
+    previous = store.previous_pulse(
+        user_id=user.id,
+        upload_id=upload.id,
     )
     return PulseRead(
         score=pulse.score,
@@ -155,13 +178,17 @@ def read_latest_pulse(user: User = Depends(get_current_user), db: Session = Depe
         summary=pulse.summary,
         factors=pulse.factors,
         metrics=pulse.metrics,
-        comparison=compare_metrics(pulse.metrics, previous.pulse.metrics if previous and previous.pulse else None),
+        comparison=compare_metrics(pulse.metrics, previous.metrics if previous else None),
     )
 
 
 @router.post("/chat", response_model=ChatResponse)
-def chat(payload: ChatRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> ChatResponse:
-    upload, pulse = latest_pulse(user.id, db)
+def chat(
+    payload: ChatRequest,
+    user: User = Depends(get_current_user),
+    store: BusinessStore = Depends(get_business_store),
+) -> ChatResponse:
+    upload, pulse = latest_pulse(user.id, store)
     context = {
         "filename": upload.filename,
         "uploaded_at": upload.created_at,
@@ -175,8 +202,11 @@ def chat(payload: ChatRequest, user: User = Depends(get_current_user), db: Sessi
 
 
 @router.get("/reports/latest.pdf")
-def report(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> StreamingResponse:
-    _, pulse = latest_pulse(user.id, db)
+def report(
+    user: User = Depends(get_current_user),
+    store: BusinessStore = Depends(get_business_store),
+) -> StreamingResponse:
+    _, pulse = latest_pulse(user.id, store)
     content = build_pulse_report(user.full_name, {
         "score": pulse.score,
         "summary": pulse.summary,
