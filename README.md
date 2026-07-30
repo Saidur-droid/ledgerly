@@ -96,6 +96,17 @@ chronological period receives a neutral growth score of `0.50` because it has
 no preceding period. The API includes this methodology in the Markdown answer,
 and the frontend renders it without maintaining a second copy of the weights.
 
+Ask Ledgerly responses use an explicit union:
+
+- a Markdown string for narrative explanations; or
+- a `structured_analysis` object containing a title, optional summary,
+  sections, tables, cards, ranking metadata, risks, and action-plan items.
+
+The frontend validates this shape at runtime. Unsupported payloads receive a
+safe user-facing production error instead of being coerced to
+`[object Object]`; development builds render escaped, formatted JSON for
+diagnosis.
+
 A column named `cash`, `cash balance`, or another balance-style alias is treated
 as a period-ending balance. The latest dated balance is the headline cash KPI;
 Ledgerly also retains its average, minimum, maximum, and first-to-latest change,

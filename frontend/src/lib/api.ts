@@ -46,8 +46,54 @@ export type Pulse = {
   } | null;
 };
 
+export type AnalysisValue = string | number | boolean | null;
+
+export type AnalysisColumn = {
+  key: string;
+  label: string;
+  align: "left" | "right";
+};
+
+export type AnalysisTable = {
+  columns: AnalysisColumn[];
+  rows: Array<Record<string, AnalysisValue>>;
+};
+
+export type AnalysisCard = {
+  label: string;
+  value: string;
+  detail?: string | null;
+};
+
+export type AnalysisSection = {
+  heading: string;
+  markdown?: string | null;
+  table?: AnalysisTable | null;
+  cards?: AnalysisCard[];
+};
+
+export type RankingMetadata = {
+  formula: string;
+  weights: Record<string, number>;
+  normalization: string;
+  first_period: string;
+  interpretation: string;
+};
+
+export type StructuredAnalysis = {
+  kind: "structured_analysis";
+  title: string;
+  summary?: string | null;
+  sections?: AnalysisSection[];
+  scoring?: RankingMetadata | null;
+  risks?: string[];
+  action_plan?: string[];
+};
+
+export type ChatAnswer = string | StructuredAnalysis;
+
 export type ChatResponse = {
-  answer: string;
+  answer: ChatAnswer;
   confidence: string;
   sources: string[];
   disclaimer: string;

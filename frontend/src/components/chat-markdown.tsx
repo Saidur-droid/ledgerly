@@ -17,9 +17,9 @@ const components: Components = {
   },
 };
 
-export function ChatMarkdown({ content }: { content: string }) {
+export function MarkdownBody({ content }: { content: string }) {
   return (
-    <div className="message-content chat-markdown">
+    <div className="chat-markdown">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={components}
@@ -27,6 +27,14 @@ export function ChatMarkdown({ content }: { content: string }) {
       >
         {content}
       </ReactMarkdown>
+    </div>
+  );
+}
+
+export function ChatMarkdown({ content }: { content: string }) {
+  return (
+    <div className="message-content">
+      <MarkdownBody content={content} />
     </div>
   );
 }
