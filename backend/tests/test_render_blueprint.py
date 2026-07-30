@@ -27,5 +27,27 @@ def test_render_blueprint_requires_managed_database_secret():
     assert environment["CORS_ORIGINS"]["value"] == VERCEL_ORIGIN
     assert environment["DATABASE_URL"]["sync"] is False
     assert "value" not in environment["DATABASE_URL"]
-    assert environment["STORAGE_PROVIDER"]["value"] == "postgres"
+    assert set(environment) == {
+        "PYTHON_VERSION",
+        "APP_ENV",
+        "DATABASE_URL",
+        "SECRET_KEY",
+        "CORS_ORIGINS",
+        "GEMINI_MODEL",
+        "MAX_UPLOAD_MB",
+        "ACCESS_TOKEN_MINUTES",
+    }
     assert "disk" not in service
+
+
+def test_local_compose_uses_postgresql_for_application_data():
+    compose_path = Path(__file__).parents[2] / "docker-compose.yml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    services = compose["services"]
+
+    assert services["postgres"]["image"].startswith("postgres:")
+    database_url = services["backend"]["environment"]["DATABASE_URL"]
+    assert database_url.startswith("postgresql+psycopg://")
+    assert services["backend"]["depends_on"]["postgres"]["condition"] == (
+        "service_healthy"
+    )

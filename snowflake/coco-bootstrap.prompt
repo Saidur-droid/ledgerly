@@ -1,6 +1,0 @@
-First report CURRENT_ACCOUNT(), CURRENT_USER(), and CURRENT_ROLE(). Read
-snowflake/setup.sql and execute its statements against the current Snowflake
-connection in order. Do not add DROP, REPLACE, DELETE, TRUNCATE, or application
-code changes. After setup, run snowflake/verify.sql. Report the active role,
-warehouse, database, schema, the three Ledgerly tables, and their row counts.
-Stop and report the exact missing privilege if any statement is denied.

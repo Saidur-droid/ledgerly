@@ -26,19 +26,3 @@ services:
         value: 20
       - key: ACCESS_TOKEN_MINUTES
         value: 1440
-      - key: STORAGE_PROVIDER
-        value: postgres
-      - key: SNOWFLAKE_ACCOUNT
-        sync: false
-      - key: SNOWFLAKE_USER
-        sync: false
-      - key: SNOWFLAKE_PASSWORD
-        sync: false
-      - key: SNOWFLAKE_WAREHOUSE
-        value: LEDGERLY_WH
-      - key: SNOWFLAKE_DATABASE
-        value: LEDGERLY
-      - key: SNOWFLAKE_SCHEMA
-        value: BUSINESS
-      - key: SNOWFLAKE_ROLE
-        value: LEDGERLY_APP_ROLE

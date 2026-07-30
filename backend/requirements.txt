@@ -12,4 +12,3 @@ pypdf==5.8.0
 reportlab==4.4.3
 google-genai==1.28.0
 email-validator==2.2.0
-snowflake-connector-python==4.7.1

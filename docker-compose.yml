@@ -1,4 +1,17 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ledgerly
+      POSTGRES_USER: ledgerly
+      POSTGRES_PASSWORD: ledgerly
+    ports: ["5432:5432"]
+    volumes: ["ledgerly-postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledgerly -d ledgerly"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   frontend:
     build: ./frontend
     ports: ["3000:3000"]
@@ -9,6 +22,10 @@ services:
     build: ./backend
     ports: ["8000:8000"]
     env_file: backend/.env
-    volumes: ["ledgerly-data:/app/data"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://ledgerly:ledgerly@postgres:5432/ledgerly
+    depends_on:
+      postgres:
+        condition: service_healthy
 volumes:
-  ledgerly-data:
+  ledgerly-postgres:

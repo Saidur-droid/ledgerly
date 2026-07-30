@@ -46,7 +46,7 @@ curl https://<backend-origin>/health
 Expected:
 
 ```json
-{"status":"healthy","service":"ledgerly-api"}
+{"status":"ok","database":"postgresql"}
 ```
 
 ### CORS
