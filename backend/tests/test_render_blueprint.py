@@ -15,7 +15,7 @@ def test_render_blueprint_requires_managed_database_secret():
     assert service["runtime"] == "python"
     assert service["rootDir"] == "backend"
     assert service["plan"] == "starter"
-    assert service["healthCheckPath"] == "/health"
+    assert service["healthCheckPath"] == "/ready"
     assert service["autoDeployTrigger"] == "commit"
     assert "pip install --no-cache-dir -r requirements.txt" in service["buildCommand"]
     assert service["startCommand"].startswith("python -m uvicorn app.main:app ")
