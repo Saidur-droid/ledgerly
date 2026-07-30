@@ -9,6 +9,7 @@ never printed.
 """
 
 import argparse
+import json
 import os
 from io import BytesIO
 from pathlib import Path
@@ -204,18 +205,26 @@ def run_smoke_test(api_url: str, check_database: bool) -> None:
             "$5,453,000.00" in aggregate_chat["answer"],
             "Aggregate chat answer did not use persisted totals.",
         )
+        period_answer = period_chat["answer"]
         require(
-            "5 best months" in period_chat["answer"]
-            and "5 worst months" in period_chat["answer"]
-            and "December 2025" in period_chat["answer"]
-            and "March 2023" in period_chat["answer"],
+            isinstance(period_answer, dict)
+            and period_answer.get("kind") == "structured_analysis",
+            "Period chat answer was not serialized as structured analysis.",
+        )
+        sections = period_answer.get("sections", [])
+        require(
+            [section.get("heading") for section in sections]
+            == ["5 best months", "5 worst months"]
+            and sections[0]["table"]["rows"][0]["month"] == "December 2025"
+            and sections[1]["table"]["rows"][0]["month"] == "March 2023",
             "Period chat answer did not analyze persisted monthly rows.",
         )
+        scoring = period_answer.get("scoring", {})
         require(
-            EXPECTED_RANKING_FORMULA in period_chat["answer"]
-            and "min–max normalized" in period_chat["answer"]
+            scoring.get("formula") == EXPECTED_RANKING_FORMULA
+            and "min–max normalized" in scoring.get("normalization", "")
             and "neutral normalized growth score of 0.50"
-            in period_chat["answer"],
+            in scoring.get("first_period", ""),
             "Period chat answer did not explain its ranking methodology.",
         )
 
@@ -257,7 +266,7 @@ def run_smoke_test(api_url: str, check_database: bool) -> None:
     print("PROMPT A RESPONSE:")
     print(aggregate_chat["answer"])
     print("\nPROMPT B RESPONSE:")
-    print(period_chat["answer"])
+    print(json.dumps(period_chat["answer"], indent=2))
     print("\nPASS: CSV -> persistence -> metrics -> Pulse -> dashboard -> question-aware chat -> PDF")
 
 

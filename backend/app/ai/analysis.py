@@ -198,20 +198,44 @@ def _rank_scores(periods: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
-def _period_table(title: str, periods: list[dict[str, Any]]) -> str:
-    lines = [
-        f"### {title}",
-        "| Rank | Month | Revenue | Expenses | Profit | Net margin | Revenue growth |",
-        "|---:|---|---:|---:|---:|---:|---:|",
-    ]
-    for rank, period in enumerate(periods, 1):
-        lines.append(
-            f"| {rank} | {period['label']} | {_money(period['revenue'])} | "
-            f"{_money(period['expenses'])} | {_money(period['profit'])} | "
-            f"{_percent(period['net_margin'])} | "
-            f"{_percent(period['revenue_growth'])} |"
-        )
-    return "\n".join(lines)
+def _period_section(
+    title: str,
+    periods: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "heading": title,
+        "table": {
+            "columns": [
+                {"key": "rank", "label": "Rank", "align": "right"},
+                {"key": "month", "label": "Month", "align": "left"},
+                {"key": "revenue", "label": "Revenue", "align": "right"},
+                {"key": "expenses", "label": "Expenses", "align": "right"},
+                {"key": "profit", "label": "Profit", "align": "right"},
+                {
+                    "key": "net_margin",
+                    "label": "Net margin",
+                    "align": "right",
+                },
+                {
+                    "key": "revenue_growth",
+                    "label": "Revenue growth",
+                    "align": "right",
+                },
+            ],
+            "rows": [
+                {
+                    "rank": rank,
+                    "month": period["label"],
+                    "revenue": _money(period["revenue"]),
+                    "expenses": _money(period["expenses"]),
+                    "profit": _money(period["profit"]),
+                    "net_margin": _percent(period["net_margin"]),
+                    "revenue_growth": _percent(period["revenue_growth"]),
+                }
+                for rank, period in enumerate(periods, 1)
+            ],
+        },
+    }
 
 
 def _ranking_groups(
@@ -225,7 +249,7 @@ def _ranking_groups(
     return best, worst
 
 
-def _best_worst_answer(periods: list[dict[str, Any]]) -> str:
+def _best_worst_answer(periods: list[dict[str, Any]]) -> str | dict[str, Any]:
     ranked = _rank_scores(periods)
     if not ranked:
         return (
@@ -233,25 +257,42 @@ def _best_worst_answer(periods: list[dict[str, Any]]) -> str:
             "expenses, and profit data to rank periods."
         )
     best, worst = _ranking_groups(ranked)
-    tables = [_period_table(f"{len(best)} best months", best)]
+    sections = [_period_section(f"{len(best)} best months", best)]
     if worst:
-        tables.append(_period_table(f"{len(worst)} worst months", worst))
-    tables_text = "\n\n".join(tables)
-    return (
-        f"I analyzed {len(ranked)} persisted rows from "
-        f"{_range_description(periods)}.\n\n"
-        f"{tables_text}\n\n"
-        "### Ranking method\n\n"
-        f"**Composite score:** `{RANKING_FORMULA}`\n\n"
-        "Each input is min–max normalized to a 0–1 score across the persisted "
-        "months before its weight is applied. Rankings use the combined score, "
-        "so the highest-profit month may not rank first when its margin or "
-        "growth is weaker.\n\n"
-        f"The first chronological month has no prior-period growth value, so it "
-        f"receives a neutral normalized growth score of {MISSING_GROWTH_SCORE:.2f}. "
-        "Negative growth remains negative before normalization and is ranked "
-        "relative to the other observed growth values."
-    )
+        sections.append(_period_section(f"{len(worst)} worst months", worst))
+    return {
+        "kind": "structured_analysis",
+        "title": "Monthly performance ranking",
+        "summary": (
+            f"I analyzed {len(ranked)} persisted rows from "
+            f"{_range_description(periods)}."
+        ),
+        "sections": sections,
+        "scoring": {
+            "formula": RANKING_FORMULA,
+            "weights": {
+                metric: round(weight * 100, 2)
+                for metric, weight in RANKING_WEIGHTS.items()
+            },
+            "normalization": (
+                "Each input is min–max normalized to a 0–1 score across the "
+                "persisted months before its weight is applied. Negative growth "
+                "remains negative before normalization and is ranked relative "
+                "to the other observed growth values."
+            ),
+            "first_period": (
+                "The first chronological month has no prior-period growth "
+                f"value, so it receives a neutral normalized growth score of "
+                f"{MISSING_GROWTH_SCORE:.2f}."
+            ),
+            "interpretation": (
+                "Rankings use a composite score, so the highest-profit month "
+                "may not rank first when its margin or growth is weaker."
+            ),
+        },
+        "risks": [],
+        "action_plan": [],
+    }
 
 
 def _trend_answer(periods: list[dict[str, Any]]) -> str:
@@ -449,7 +490,10 @@ def _scenario_answer(context: dict[str, Any], question: str) -> str:
     )
 
 
-def deterministic_answer(question: str, context: dict[str, Any]) -> str | None:
+def deterministic_answer(
+    question: str,
+    context: dict[str, Any],
+) -> str | dict[str, Any] | None:
     metrics = context.get("metrics", {})
     if not metrics:
         return "I could not identify enough structured metrics in the latest upload to answer that confidently."

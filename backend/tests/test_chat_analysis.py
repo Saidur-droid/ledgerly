@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.ai.analysis import (
@@ -13,6 +14,7 @@ from app.ai.analysis import (
 )
 from app.core.database import SessionLocal
 from app.models import Upload
+from app.schemas import ChatResponse
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_business_data.csv"
 PROMPT_A = "Summarize my total revenue, expenses, profit, and net margin."
@@ -123,23 +125,39 @@ def test_chat_questions_use_persisted_rows_and_produce_distinct_answers(client):
     assert "$3,919,000.00" in aggregate_answer
     assert "$1,534,000.00" in aggregate_answer
     assert "28.13%" in aggregate_answer
-    assert "5 best months" in period_answer
-    assert "5 worst months" in period_answer
-    assert "| Rank | Month | Revenue | Expenses | Profit | Net margin | Revenue growth |" in period_answer
-    assert (
-        "| 1 | December 2025 | $240,000.00 | $158,000.00 | "
-        "$82,000.00 | 34.17% | 11.63% |"
-    ) in period_answer
-    assert (
-        "| 1 | March 2023 | $98,000.00 | $79,000.00 | "
-        "$19,000.00 | 19.39% | -6.67% |"
-    ) in period_answer
+    assert period_answer["kind"] == "structured_analysis"
+    assert period_answer["title"] == "Monthly performance ranking"
+    assert [section["heading"] for section in period_answer["sections"]] == [
+        "5 best months",
+        "5 worst months",
+    ]
+    assert period_answer["sections"][0]["table"]["rows"][0] == {
+        "rank": 1,
+        "month": "December 2025",
+        "revenue": "$240,000.00",
+        "expenses": "$158,000.00",
+        "profit": "$82,000.00",
+        "net_margin": "34.17%",
+        "revenue_growth": "11.63%",
+    }
+    assert period_answer["sections"][1]["table"]["rows"][0] == {
+        "rank": 1,
+        "month": "March 2023",
+        "revenue": "$98,000.00",
+        "expenses": "$79,000.00",
+        "profit": "$19,000.00",
+        "net_margin": "19.39%",
+        "revenue_growth": "-6.67%",
+    }
     assert "previous upload" not in aggregate_answer.lower()
-    assert "previous upload" not in period_answer.lower()
-    assert RANKING_FORMULA in period_answer
-    assert "min–max normalized" in period_answer
-    assert "highest-profit month may not rank first" in period_answer
-    assert "neutral normalized growth score of 0.50" in period_answer
+    assert RANKING_FORMULA == period_answer["scoring"]["formula"]
+    assert "min–max normalized" in period_answer["scoring"]["normalization"]
+    assert "highest-profit month may not rank first" in (
+        period_answer["scoring"]["interpretation"]
+    )
+    assert "neutral normalized growth score of 0.50" in (
+        period_answer["scoring"]["first_period"]
+    )
     assert aggregate.json()["confidence"] == "data-grounded"
     assert period_analysis.json()["confidence"] == "data-grounded"
 
@@ -297,3 +315,48 @@ def test_ranking_ties_are_stable_and_best_worst_do_not_overlap():
     )
     assert len(best) == 3
     assert len(worst) == 3
+
+
+def test_chat_response_schema_accepts_only_string_or_structured_answers():
+    common = {
+        "confidence": "data-grounded",
+        "sources": ["sample.csv"],
+        "disclaimer": "Explanation only.",
+    }
+    plain = ChatResponse.model_validate(
+        {
+            **common,
+            "answer": "**Revenue:** $100",
+        }
+    )
+    structured = ChatResponse.model_validate(
+        {
+            **common,
+            "answer": {
+                "kind": "structured_analysis",
+                "title": "Scenario",
+                "sections": [
+                    {
+                        "heading": "Forecast",
+                        "markdown": "A historical projection.",
+                        "cards": [
+                            {"label": "Revenue", "value": "$100"},
+                        ],
+                    }
+                ],
+                "risks": ["Limited history."],
+                "action_plan": ["Review the source rows."],
+            },
+        }
+    )
+
+    assert plain.answer == "**Revenue:** $100"
+    assert structured.answer.kind == "structured_analysis"
+    assert structured.answer.sections[0].heading == "Forecast"
+    with pytest.raises(ValidationError):
+        ChatResponse.model_validate(
+            {
+                **common,
+                "answer": {"unexpected": "shape"},
+            }
+        )

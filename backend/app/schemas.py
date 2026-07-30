@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -66,8 +67,53 @@ class ChatRequest(BaseModel):
     question: str = Field(min_length=2, max_length=1000)
 
 
+AnalysisValue = str | int | float | bool | None
+
+
+class AnalysisColumn(BaseModel):
+    key: str = Field(min_length=1, max_length=80)
+    label: str = Field(min_length=1, max_length=120)
+    align: Literal["left", "right"] = "left"
+
+
+class AnalysisTable(BaseModel):
+    columns: list[AnalysisColumn] = Field(min_length=1, max_length=20)
+    rows: list[dict[str, AnalysisValue]] = Field(max_length=100)
+
+
+class AnalysisCard(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
+    value: str = Field(min_length=1, max_length=240)
+    detail: str | None = Field(default=None, max_length=500)
+
+
+class AnalysisSection(BaseModel):
+    heading: str = Field(min_length=1, max_length=160)
+    markdown: str | None = Field(default=None, max_length=20_000)
+    table: AnalysisTable | None = None
+    cards: list[AnalysisCard] = Field(default_factory=list, max_length=20)
+
+
+class RankingMetadata(BaseModel):
+    formula: str = Field(min_length=1, max_length=300)
+    weights: dict[str, float]
+    normalization: str = Field(min_length=1, max_length=1_000)
+    first_period: str = Field(min_length=1, max_length=1_000)
+    interpretation: str = Field(min_length=1, max_length=1_000)
+
+
+class StructuredAnalysis(BaseModel):
+    kind: Literal["structured_analysis"]
+    title: str = Field(min_length=1, max_length=200)
+    summary: str | None = Field(default=None, max_length=5_000)
+    sections: list[AnalysisSection] = Field(default_factory=list, max_length=30)
+    scoring: RankingMetadata | None = None
+    risks: list[str] = Field(default_factory=list, max_length=30)
+    action_plan: list[str] = Field(default_factory=list, max_length=30)
+
+
 class ChatResponse(BaseModel):
-    answer: str
+    answer: str | StructuredAnalysis
     confidence: str
     sources: list[str]
     disclaimer: str

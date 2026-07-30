@@ -17,7 +17,7 @@ Never give investment, pricing, hiring, or financial recommendations. Never guar
 State when the data is insufficient. Keep the answer clear, concise, and evidence-based."""
 
 
-def _fallback_answer(question: str, context: dict) -> str:
+def _fallback_answer(question: str, context: dict) -> str | dict:
     analyzed = deterministic_answer(question, context)
     if analyzed is not None:
         return analyzed
@@ -32,7 +32,10 @@ def _fallback_answer(question: str, context: dict) -> str:
     )
 
 
-def answer_business_question(question: str, context: dict) -> tuple[str, str]:
+def answer_business_question(
+    question: str,
+    context: dict,
+) -> tuple[str | dict, str]:
     if PROHIBITED.search(question):
         return (
             "I can explain what your uploaded data shows, but I can’t provide investment, pricing, hiring, or outcome-guarantee advice.",
