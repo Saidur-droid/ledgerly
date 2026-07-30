@@ -1,4 +1,5 @@
 from io import BytesIO
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -15,12 +16,15 @@ def build_pulse_report(company_name: str, pulse: dict) -> bytes:
         Paragraph("LEDGERLY", styles["Heading3"]),
         Paragraph("Your business speaks.", styles["Title"]),
         Spacer(1, 8 * mm),
-        Paragraph(company_name, styles["Heading2"]),
+        Paragraph(escape(company_name), styles["Heading2"]),
         Paragraph(f"Business Pulse™: {pulse['score']}/100", styles["Heading1"]),
-        Paragraph(pulse["summary"], styles["BodyText"]),
+        Paragraph(escape(pulse["summary"]), styles["BodyText"]),
         Spacer(1, 7 * mm),
     ]
-    rows = [["Metric", "Value"]] + [[key.replace("_", " ").title(), f"{value:,.2f}"] for key, value in pulse["metrics"].items()]
+    rows = [["Metric", "Value"]] + [
+        [escape(key.replace("_", " ").title()), f"{value:,.2f}"]
+        for key, value in pulse["metrics"].items()
+    ]
     table = Table(rows, colWidths=[90 * mm, 60 * mm])
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#7357FF")),

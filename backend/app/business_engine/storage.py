@@ -63,7 +63,6 @@ class BusinessStore:
 
     def __init__(self, session: Session):
         self.session = session
-        self._pending_metrics: dict[int, dict[str, float]] = {}
 
     def create_upload(
         self,
@@ -77,6 +76,7 @@ class BusinessStore:
         normalized_data: dict[str, Any],
         metrics: dict[str, float],
     ) -> StoredUpload:
+        stored_data = {**normalized_data, "metrics": metrics}
         upload = Upload(
             user_id=user_id,
             filename=filename,
@@ -84,22 +84,25 @@ class BusinessStore:
             checksum=checksum,
             row_count=row_count,
             confidence=confidence,
-            normalized_data=normalized_data,
+            normalized_data=stored_data,
         )
         self.session.add(upload)
         self.session.flush()
-        self._pending_metrics[upload.id] = metrics
         return _upload_from_model(upload)
 
     def get_metrics(self, *, user_id: int, upload_id: int) -> dict[str, float]:
-        if upload_id in self._pending_metrics:
-            return self._pending_metrics[upload_id]
-        pulse = self.session.scalar(
-            select(Pulse)
-            .join(Upload)
-            .where(Upload.user_id == user_id, Pulse.upload_id == upload_id)
+        upload = self.session.scalar(
+            select(Upload).where(
+                Upload.user_id == user_id,
+                Upload.id == upload_id,
+            )
         )
-        return pulse.metrics if pulse else {}
+        if upload is None:
+            return {}
+        return {
+            str(name): float(value)
+            for name, value in upload.normalized_data.get("metrics", {}).items()
+        }
 
     def save_pulse(self, *, user_id: int, pulse: StoredPulse) -> None:
         upload_exists = self.session.scalar(
@@ -121,13 +124,13 @@ class BusinessStore:
             )
         )
         self.session.commit()
-        self._pending_metrics.pop(pulse.upload_id, None)
 
     def list_uploads(self, *, user_id: int) -> list[StoredUpload]:
         uploads = self.session.scalars(
             select(Upload)
             .where(Upload.user_id == user_id)
             .order_by(Upload.created_at.desc())
+            .limit(100)
         ).all()
         return [_upload_from_model(upload) for upload in uploads]
 

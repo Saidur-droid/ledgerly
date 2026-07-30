@@ -33,7 +33,13 @@ def answer_business_question(question: str, context: dict) -> tuple[str, str]:
     settings = get_settings()
     if not settings.gemini_api_key:
         return _fallback_answer(question, context), "data-grounded"
-    client = genai.Client(api_key=settings.gemini_api_key)
-    prompt = f"{SYSTEM_INSTRUCTION}\n\nDATA CONTEXT:\n{json.dumps(context, default=str)[:25000]}\n\nQUESTION:\n{question}"
-    response = client.models.generate_content(model=settings.gemini_model, contents=prompt)
+    try:
+        client = genai.Client(api_key=settings.gemini_api_key)
+        prompt = f"{SYSTEM_INSTRUCTION}\n\nDATA CONTEXT:\n{json.dumps(context, default=str)[:25000]}\n\nQUESTION:\n{question}"
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=prompt,
+        )
+    except Exception:
+        return _fallback_answer(question, context), "data-grounded"
     return response.text or _fallback_answer(question, context), "high"

@@ -132,6 +132,15 @@ button { cursor: pointer; }
 .privacy-note svg { color: var(--green); }
 .modal-primary { width: 100%; height: 40px; border: 0; border-radius: 9px; color: white; background: linear-gradient(#7b60f8, #6749e6); font-size: 11px; font-weight: 700; }
 .modal-primary:disabled { color: #aaa3b2; background: #ece9ef; cursor: not-allowed; }
+.form-error { margin: 10px 0 0!important; color: #a93636!important; font-size: 10px!important; }
+.status-banner { margin: 0 0 14px; padding: 11px 13px; border-radius: 9px; font-size: 10px; }
+.status-error { color: #8d2929; background: #fff0f0; border: 1px solid #f4cccc; }
+.status-success { color: #236f4c; background: #edf9f3; border: 1px solid #c8ead9; }
+.loading-card { display: flex; grid-template-columns: none; align-items: center; gap: 13px; min-height: 100px; }
+.loading-card h2, .loading-card p { margin: 0; }.loading-card p { margin-top: 4px; color: var(--muted); font-size: 10px; }
+.loading-spinner { width: 24px; height: 24px; border: 3px solid #e8e3fb; border-top-color: #7153ef; border-radius: 50%; animation: ledgerly-spin .8s linear infinite; }
+@keyframes ledgerly-spin { to { transform: rotate(360deg); } }
+.secondary-button:disabled, .chat-composer button:disabled, .quick-questions button:disabled { cursor: not-allowed; opacity: .5; }
 .chat-panel { position: fixed; inset: 0 -390px 0 auto; z-index: 90; width: 380px; display: flex; flex-direction: column; background: white; box-shadow: -20px 0 60px rgba(30,20,60,.12); transition: transform .28s ease; }
 .chat-panel-open { transform: translateX(-390px); }
 .chat-header { height: 68px; padding: 0 17px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
@@ -168,8 +177,7 @@ button { cursor: pointer; }
 .login-card h2 { margin: 13px 0 6px; font-size: 27px; letter-spacing: -.8px; }.login-card > p { margin: 0 0 27px; color: var(--muted); font-size: 11px; }.login-card > label { display: block; color: #4b4553; font-size: 10px; font-weight: 650; margin-top: 15px; }
 .login-card input[type="email"], .password-input { width: 100%; height: 43px; margin-top: 7px; border: 1px solid #ddd9e3; border-radius: 9px; background: #fdfcfe; }.login-card input[type="email"], .password-input input { padding: 0 12px; outline: none; font-size: 11px; }.login-card input:focus, .password-input:focus-within { border-color: #8066ed; box-shadow: 0 0 0 3px #eeeaff; }
 .password-input { display: flex; align-items: center; }.password-input input { min-width: 0; flex: 1; height: 100%; border: 0; background: transparent; }.password-input button { padding: 10px; border: 0; background: transparent; color: #8f8898; }
-.login-options { display: flex; justify-content: space-between; align-items: center; margin: 13px 0 18px; font-size: 9px; }.login-options label { display: flex; align-items: center; gap: 6px; color: #716a7b; }.login-options a, .signup-copy a { color: #6748dd; text-decoration: none; font-weight: 650; }
-.sign-in-button, .demo-button { width: 100%; height: 43px; border-radius: 9px; font-size: 11px; font-weight: 680; }.sign-in-button { display: flex; align-items: center; justify-content: center; gap: 8px; border: 0; color: white; background: linear-gradient(#7d62f4,#6244dd); box-shadow: 0 6px 15px rgba(85,54,201,.2); }.demo-button { color: #5e536c; border: 1px solid #dfdbe5; background: white; }
-.login-divider { display: flex; align-items: center; margin: 17px 0; color: #aaa4af; font-size: 8px; }.login-divider::before,.login-divider::after { content:""; height: 1px; flex: 1; background: #ece9ef; }.login-divider span { padding: 0 10px; }
+.signup-copy a { color: #6748dd; text-decoration: none; font-weight: 650; }
+.sign-in-button, .secondary-form-button { width: 100%; height: 43px; margin-top: 18px; border-radius: 9px; font-size: 11px; font-weight: 680; }.sign-in-button { display: flex; align-items: center; justify-content: center; gap: 8px; border: 0; color: white; background: linear-gradient(#7d62f4,#6244dd); box-shadow: 0 6px 15px rgba(85,54,201,.2); }.secondary-form-button { color: #5e536c; border: 1px solid #dfdbe5; background: white; }
 .signup-copy { margin: 19px 0 0!important; text-align: center; font-size: 9px!important; }.security-copy { display: block; text-align: center; color: #aaa4af; font-size: 8px; margin-top: 35px; }
 @media (max-width: 760px) { .login-shell { grid-template-columns: 1fr; }.login-story { display: none; }.login-form-side { min-height: 100vh; padding: 25px; }.mobile-login-brand { margin-bottom: 45px; display: flex; align-items: center; gap: 7px; color: #6043d2; font-size: 16px; font-weight: 720; } }

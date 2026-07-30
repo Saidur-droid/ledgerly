@@ -3,16 +3,20 @@
 import { useState } from "react";
 import { ArrowRight, Check, Eye, EyeOff, Sparkles, TrendingUp } from "lucide-react";
 import Link from "next/link";
-import { clearSession, login, register } from "@/lib/api";
+import { login, register } from "@/lib/api";
 
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isRegistering, setIsRegistering] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setSubmitting(true);
+    setErrorMessage("");
     try {
       if (isRegistering) {
         await register(email, password);
@@ -24,7 +28,9 @@ export default function LoginPage() {
       const fallback = isRegistering
         ? "Unable to create your account."
         : "Unable to sign in.";
-      window.alert(error instanceof Error ? error.message : fallback);
+      setErrorMessage(error instanceof Error ? error.message : fallback);
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -52,23 +58,22 @@ export default function LoginPage() {
           <p>{isRegistering ? "Start the conversation with your business." : "Continue the conversation with your business."}</p>
           <label>Email address<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@company.com" /></label>
           <label>Password<div className="password-input"><input type={showPassword ? "text" : "password"} required minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" /><button type="button" aria-label="Show password" onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label>
-          <div className="login-options"><label><input type="checkbox" />Remember me</label><a href="#">Forgot password?</a></div>
-          <button className="sign-in-button">{isRegistering ? "Create account" : "Sign in"} <ArrowRight size={16} /></button>
-          <div className="login-divider"><span>or</span></div>
-          <button type="button" className="demo-button" onClick={() => { clearSession(); window.location.href = "/"; }}>Explore the live demo</button>
+          {errorMessage && <p className="form-error" role="alert">{errorMessage}</p>}
+          <button className="sign-in-button" disabled={submitting}>{submitting ? "Please wait..." : isRegistering ? "Create account" : "Sign in"} {!submitting && <ArrowRight size={16} />}</button>
           <p className="signup-copy">
             {isRegistering ? "Already have an account? " : "New to Ledgerly? "}
             <a
               href="#"
               onClick={(event) => {
                 event.preventDefault();
+                setErrorMessage("");
                 setIsRegistering((value) => !value);
               }}
             >
               {isRegistering ? "Sign in" : "Create your account"}
             </a>
           </p>
-          <small className="security-copy">Your business data is encrypted in transit and at rest.</small>
+          <small className="security-copy">Your business data is encrypted in transit and isolated to your account.</small>
         </form>
       </section>
     </main>

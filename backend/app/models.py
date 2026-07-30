@@ -25,7 +25,10 @@ class Upload(Base):
     __tablename__ = "uploads"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+    )
     filename: Mapped[str] = mapped_column(String(255))
     file_type: Mapped[str] = mapped_column(String(20))
     checksum: Mapped[str] = mapped_column(String(64), index=True)
@@ -41,7 +44,10 @@ class Pulse(Base):
     __tablename__ = "pulses"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    upload_id: Mapped[int] = mapped_column(ForeignKey("uploads.id"), unique=True)
+    upload_id: Mapped[int] = mapped_column(
+        ForeignKey("uploads.id", ondelete="CASCADE"),
+        unique=True,
+    )
     score: Mapped[int] = mapped_column(Integer)
     confidence: Mapped[float] = mapped_column(Float)
     summary: Mapped[str] = mapped_column(Text)

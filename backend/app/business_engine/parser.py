@@ -90,6 +90,10 @@ def parse_business_file(filename: str, content: bytes) -> ParsedBusinessData:
             raise ValueError(
                 "The CSV is empty or does not contain readable columns."
             ) from error
+        except pd.errors.ParserError as error:
+            raise ValueError(
+                "The CSV is malformed and could not be parsed."
+            ) from error
     if extension == ".xlsx":
         return _frame_result(pd.read_excel(io.BytesIO(content)))
     if extension == ".json":

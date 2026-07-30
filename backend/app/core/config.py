@@ -4,17 +4,14 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEVELOPMENT_SECRET = "development-only-change-this-key-now"
-PRODUCTION_FRONTEND_ORIGIN = "https://ledgerly-one-xi.vercel.app"
 
 
 class Settings(BaseSettings):
     app_name: str = "Ledgerly API"
     app_env: str = "development"
     secret_key: str = Field(default=DEVELOPMENT_SECRET)
-    database_url: str = (
-        "postgresql+psycopg://ledgerly:ledgerly@localhost:5432/ledgerly"
-    )
-    cors_origins: str = "http://localhost:3000"
+    database_url: str = ""
+    cors_origins: str = ""
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
     max_upload_mb: int = 20
@@ -23,10 +20,11 @@ class Settings(BaseSettings):
 
     @property
     def allowed_origins(self) -> list[str]:
-        origins = [origin.strip().rstrip("/") for origin in self.cors_origins.split(",") if origin.strip()]
-        if self.app_env.lower() == "production" and PRODUCTION_FRONTEND_ORIGIN not in origins:
-            origins.append(PRODUCTION_FRONTEND_ORIGIN)
-        return origins
+        return [
+            origin.strip().rstrip("/")
+            for origin in self.cors_origins.split(",")
+            if origin.strip()
+        ]
 
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":

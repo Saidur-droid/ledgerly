@@ -1,4 +1,5 @@
 import hashlib
+import re
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -34,6 +35,7 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/api/v1")
+SAFE_FILENAME_SEPARATOR = re.compile(r"[/\\]+")
 
 
 @router.post("/auth/register", response_model=Token, status_code=status.HTTP_201_CREATED)
@@ -95,20 +97,32 @@ async def upload_business_data(
     user: User = Depends(get_current_user),
     store: BusinessStore = Depends(get_business_store),
 ) -> PulseRead:
-    content = await file.read()
+    filename = SAFE_FILENAME_SEPARATOR.split(file.filename or "upload")[-1]
+    if not filename or len(filename) > 255:
+        raise HTTPException(
+            status_code=400,
+            detail="The file name must be between 1 and 255 characters.",
+        )
     limit = get_settings().max_upload_mb * 1024 * 1024
+    content = await file.read(limit + 1)
     if len(content) > limit:
-        raise HTTPException(status_code=413, detail="File is larger than the configured upload limit.")
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"The file exceeds the {get_settings().max_upload_mb} MB "
+                "upload limit."
+            ),
+        )
     try:
-        parsed = parse_business_file(file.filename or "upload", content)
+        parsed = parse_business_file(filename, content)
     except (ValueError, TypeError) as error:
         raise HTTPException(status_code=400, detail=str(error))
 
     try:
         upload = store.create_upload(
             user_id=user.id,
-            filename=file.filename or "upload",
-            file_type=(file.filename or "").rsplit(".", 1)[-1].lower(),
+            filename=filename,
+            file_type=filename.rsplit(".", 1)[-1].lower(),
             checksum=hashlib.sha256(content).hexdigest(),
             row_count=len(parsed.records),
             confidence=parsed.confidence,

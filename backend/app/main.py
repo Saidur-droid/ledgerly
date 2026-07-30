@@ -1,11 +1,14 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from app.api.routes import router
 from app.core.config import get_settings
-from app.core.database import Base, engine
+from app.core.database import Base, engine, get_db
 from app.core.migrations import run_postgres_migrations
 
 
@@ -39,5 +42,20 @@ app.include_router(router)
 def health() -> dict[str, str]:
     return {
         "status": "ok",
+        "database": "postgresql",
+    }
+
+
+@app.get("/ready")
+def readiness(db: Session = Depends(get_db)) -> dict[str, str]:
+    try:
+        db.execute(text("SELECT 1")).scalar_one()
+    except SQLAlchemyError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="Database is unavailable.",
+        ) from error
+    return {
+        "status": "ready",
         "database": "postgresql",
     }

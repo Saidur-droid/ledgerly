@@ -1,6 +1,8 @@
-const API_URL = (
-  process.env.NEXT_PUBLIC_API_URL ?? "https://ledgerly-z984.onrender.com"
-).replace(/\/$/, "");
+const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL;
+if (!configuredApiUrl && process.env.NODE_ENV === "production") {
+  throw new Error("NEXT_PUBLIC_API_URL is required for production builds.");
+}
+const API_URL = (configuredApiUrl ?? "http://localhost:8000").replace(/\/$/, "");
 
 const TOKEN_KEY = "ledgerly_access_token";
 
@@ -82,14 +84,22 @@ async function parseError(response: Response) {
 }
 
 async function apiFetch(path: string, init: RequestInit = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: {
-      Accept: "application/json",
-      ...authHeaders(),
-      ...init.headers,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: {
+        Accept: "application/json",
+        ...authHeaders(),
+        ...init.headers,
+      },
+    });
+  } catch {
+    throw new ApiError(
+      "Ledgerly could not reach the API. Please try again in a moment.",
+      0,
+    );
+  }
   if (response.status === 401 && accessToken()) {
     clearSession();
     if (window.location.pathname !== "/login") {
