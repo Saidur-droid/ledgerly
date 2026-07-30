@@ -3,6 +3,7 @@ import re
 
 from google import genai
 
+from app.ai.analysis import deterministic_answer
 from app.core.config import get_settings
 
 PROHIBITED = re.compile(
@@ -17,11 +18,18 @@ State when the data is insufficient. Keep the answer clear, concise, and evidenc
 
 
 def _fallback_answer(question: str, context: dict) -> str:
+    analyzed = deterministic_answer(question, context)
+    if analyzed is not None:
+        return analyzed
     metrics = context.get("metrics", {})
     if not metrics:
         return "I could not identify enough structured metrics in the latest upload to answer that confidently."
     rendered = ", ".join(f"{name.replace('_', ' ')}: {value:,.2f}" for name, value in metrics.items())
-    return f"The latest upload shows {rendered}. I can explain changes once a previous upload contains matching metrics."
+    return (
+        f"The latest persisted upload shows {rendered}. Ask about totals, best "
+        "and worst periods, trends, seasonality, margins, cash, risks, forecasts, "
+        "or scenarios for a focused analysis."
+    )
 
 
 def answer_business_question(question: str, context: dict) -> tuple[str, str]:
@@ -30,6 +38,9 @@ def answer_business_question(question: str, context: dict) -> tuple[str, str]:
             "I can explain what your uploaded data shows, but I can’t provide investment, pricing, hiring, or outcome-guarantee advice.",
             "policy-limited",
         )
+    analyzed = deterministic_answer(question, context)
+    if analyzed is not None:
+        return analyzed, "data-grounded"
     settings = get_settings()
     if not settings.gemini_api_key:
         return _fallback_answer(question, context), "data-grounded"

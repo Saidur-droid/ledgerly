@@ -130,6 +130,7 @@ async def upload_business_data(
                 "columns": parsed.columns,
                 "records": parsed.records,
                 "warnings": parsed.warnings,
+                "metadata": parsed.metadata,
             },
             metrics=parsed.metrics,
         )
