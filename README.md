@@ -228,6 +228,8 @@ npm --prefix frontend run typecheck
 npm --prefix frontend run build
 cd backend
 .venv/Scripts/python.exe -m pytest tests
+.venv/Scripts/python.exe -m compileall -q app scripts
+.venv/Scripts/python.exe -m pip check
 .venv/Scripts/python.exe -c "from app.main import app; print(app.title)"
 ```
 
@@ -239,6 +241,37 @@ Enable the repository pre-commit gate:
 ```bash
 git config core.hooksPath .githooks
 ```
+
+## End-to-end smoke test
+
+The smoke runner uses
+`backend/tests/fixtures/sample_business_data.csv` and calls the real API. It
+registers a synthetic user, logs in, uploads the CSV, verifies persisted
+Business Memory and Pulse responses, asks a data-grounded question, downloads
+and reads the PDF, and signs in again to confirm persistence.
+
+With the backend running:
+
+```bash
+cd backend
+python scripts/smoke_test.py --api-url http://localhost:8000
+```
+
+To additionally query upload and Pulse rows directly from local PostgreSQL,
+export the same `DATABASE_URL` used by the API and run:
+
+```bash
+python scripts/smoke_test.py --api-url http://localhost:8000 --verify-database
+```
+
+Against production:
+
+```bash
+python scripts/smoke_test.py --api-url https://ledgerly-z984.onrender.com
+```
+
+The script never prints credentials or access tokens. Smoke-test accounts use
+synthetic `example.com` addresses and contain no customer data.
 
 ## Production deployment
 
@@ -255,6 +288,11 @@ git config core.hooksPath .githooks
    ```json
    {"status":"ok","database":"postgresql"}
    ```
+6. Verify `GET /ready` returns:
+
+   ```json
+   {"status":"ready","database":"postgresql"}
+   ```
 
 The complete checklist is in
 [Render deployment](docs/RENDER_DEPLOYMENT.md). Database operations are
@@ -268,17 +306,22 @@ documented in [Supabase PostgreSQL](docs/SUPABASE_POSTGRES.md).
 4. Deploy.
 5. Register a new user and complete the verification flow below.
 
-## Production verification flow
+## Production verification checklist
 
-1. Register a new account.
-2. Sign out and sign back in.
-3. Upload a CSV containing `revenue` and `expenses`.
-4. Confirm the dashboard shows detected metrics and Business Pulse.
-5. Refresh and confirm the upload remains in Business Memory.
-6. Ask a question whose answer exists in the uploaded data.
-7. Export the PDF report.
-8. Register a second account and confirm it has an empty dashboard.
-9. Confirm the second account cannot see the first account's uploads.
+- [ ] `GET /health` returns the PostgreSQL health contract.
+- [ ] `GET /ready` returns `200` after executing a database query.
+- [ ] The Vercel app loads without console or failed-network errors.
+- [ ] A new account registers and can sign in again.
+- [ ] An empty account shows the upload-first state without fabricated KPIs.
+- [ ] `sample_business_data.csv` uploads successfully.
+- [ ] Revenue is `41,250`, expenses are `24,350`, and profit is `16,900`.
+- [ ] Business Pulse shows a bounded score, confidence, summary, and factors.
+- [ ] Refreshing preserves the upload, dashboard metrics, and Pulse.
+- [ ] AI chat cites `sample_business_data.csv`.
+- [ ] PDF export downloads a non-empty PDF containing revenue `41,250.00`.
+- [ ] A second account cannot see the first account's upload.
+- [ ] The automated production smoke runner prints `PASS`.
+- [ ] The deployed Git commit matches `origin/main`.
 
 ## Security
 
