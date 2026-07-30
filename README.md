@@ -44,7 +44,7 @@ uploads, normalized business records, metrics, and Pulse history.
 - Automatic KPI detection and transparent confidence
 - Explainable Business Pulse score and factors
 - Historical upload comparison and persistent business memory
-- Data-grounded AI chat with a deterministic fallback
+- Question-aware AI chat over persisted period rows, with deterministic analysis
 - Authenticated, user-isolated dashboard APIs
 - PDF report export
 - Responsive Next.js interface
@@ -80,6 +80,20 @@ PostgreSQL
 The frontend never connects directly to the database. FastAPI owns
 authentication, authorization, persistence, migrations, parsing, scoring, AI
 context, and report generation.
+
+### Period and cash semantics
+
+Tabular uploads retain up to 500 normalized source rows. Ledgerly derives
+row-level profit, net margin, and period-over-period revenue growth when the
+required values are present. Ask Ledgerly can use those persisted rows for
+totals, best/worst-period ranking, trends, seasonality, margins, cash, risks,
+historical projections, and transparent scenarios.
+
+A column named `cash`, `cash balance`, or another balance-style alias is treated
+as a period-ending balance. The latest dated balance is the headline cash KPI;
+Ledgerly also retains its average, minimum, maximum, and first-to-latest change,
+but does not sum balances. Cash is additive only when the source column
+explicitly identifies a period flow, such as `cash_flow`.
 
 ## Repository
 
@@ -246,9 +260,9 @@ git config core.hooksPath .githooks
 
 The smoke runner uses
 `backend/tests/fixtures/sample_business_data.csv` and calls the real API. It
-registers a synthetic user, logs in, uploads the CSV, verifies persisted
-Business Memory and Pulse responses, asks a data-grounded question, downloads
-and reads the PDF, and signs in again to confirm persistence.
+registers a synthetic user, logs in, uploads the 36-row CSV, verifies persisted
+Business Memory and Pulse responses, compares aggregate and month-ranking chat
+answers, downloads and reads the PDF, and signs in again to confirm persistence.
 
 With the backend running:
 

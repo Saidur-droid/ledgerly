@@ -26,11 +26,17 @@ FIXTURE_PATH = (
     / "sample_business_data.csv"
 )
 EXPECTED_METRICS = {
-    "revenue": 41_250,
-    "expenses": 24_350,
-    "profit": 16_900,
-    "cash": 59_350,
+    "revenue": 5_453_000,
+    "expenses": 3_919_000,
+    "profit": 1_534_000,
+    "cash": 245_000,
 }
+PROMPT_A = "Summarize my total revenue, expenses, profit, and net margin."
+PROMPT_B = (
+    "Analyze each monthly row in my uploaded CSV. Identify the five best and "
+    "five worst months using profit, net margin, and revenue growth. Include "
+    "the exact month and values in a table."
+)
 
 
 def require(condition: bool, message: str) -> None:
@@ -167,17 +173,40 @@ def run_smoke_test(api_url: str, check_database: bool) -> None:
             "Persisted dashboard metrics do not match the uploaded CSV.",
         )
 
-        chat = response_json(
+        aggregate_chat = response_json(
             client.post(
                 "/api/v1/chat",
                 headers=headers,
-                json={"question": "What revenue is present in my latest upload?"},
+                json={"question": PROMPT_A},
+            ),
+            200,
+        )
+        period_chat = response_json(
+            client.post(
+                "/api/v1/chat",
+                headers=headers,
+                json={"question": PROMPT_B},
             ),
             200,
         )
         require(
-            chat["sources"] == [FIXTURE_PATH.name],
+            aggregate_chat["sources"] == [FIXTURE_PATH.name],
             "AI chat did not use the uploaded file as its source.",
+        )
+        require(
+            aggregate_chat["answer"] != period_chat["answer"],
+            "Different questions returned the same answer.",
+        )
+        require(
+            "$5,453,000.00" in aggregate_chat["answer"],
+            "Aggregate chat answer did not use persisted totals.",
+        )
+        require(
+            "5 best months" in period_chat["answer"]
+            and "5 worst months" in period_chat["answer"]
+            and "December 2025" in period_chat["answer"]
+            and "March 2023" in period_chat["answer"],
+            "Period chat answer did not analyze persisted monthly rows.",
         )
 
         report = client.get("/api/v1/reports/latest.pdf", headers=headers)
@@ -188,7 +217,10 @@ def run_smoke_test(api_url: str, check_database: bool) -> None:
             page.extract_text() or ""
             for page in PdfReader(BytesIO(report.content)).pages
         )
-        require("41,250.00" in report_text, "Report does not contain CSV revenue.")
+        require(
+            "5,453,000.00" in report_text,
+            "Report does not contain CSV revenue.",
+        )
 
         second_login = response_json(
             client.post(
@@ -212,7 +244,11 @@ def run_smoke_test(api_url: str, check_database: bool) -> None:
     if check_database:
         verify_database(email)
 
-    print("PASS: CSV -> persistence -> metrics -> Pulse -> dashboard -> chat -> PDF")
+    print("PROMPT A RESPONSE:")
+    print(aggregate_chat["answer"])
+    print("\nPROMPT B RESPONSE:")
+    print(period_chat["answer"])
+    print("\nPASS: CSV -> persistence -> metrics -> Pulse -> dashboard -> question-aware chat -> PDF")
 
 
 def main() -> None:

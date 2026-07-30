@@ -101,7 +101,7 @@ python scripts/smoke_test.py --api-url https://<backend-origin>
 Expected final line:
 
 ```text
-PASS: CSV -> persistence -> metrics -> Pulse -> dashboard -> chat -> PDF
+PASS: CSV -> persistence -> metrics -> Pulse -> dashboard -> question-aware chat -> PDF
 ```
 
 ## Optional Gemini activation
