@@ -38,7 +38,6 @@ app.include_router(router)
 @app.get("/health")
 def health() -> dict[str, str]:
     return {
-        "status": "healthy",
-        "service": "ledgerly-api",
-        "business_storage": settings.storage_provider,
+        "status": "ok",
+        "database": "postgresql",
     }

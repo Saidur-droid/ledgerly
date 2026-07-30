@@ -84,7 +84,12 @@ def parse_business_file(filename: str, content: bytes) -> ParsedBusinessData:
     if extension not in ALLOWED_EXTENSIONS:
         raise ValueError("Unsupported file type. Use CSV, XLSX, PDF, or JSON.")
     if extension == ".csv":
-        return _frame_result(pd.read_csv(io.BytesIO(content)))
+        try:
+            return _frame_result(pd.read_csv(io.BytesIO(content)))
+        except pd.errors.EmptyDataError as error:
+            raise ValueError(
+                "The CSV is empty or does not contain readable columns."
+            ) from error
     if extension == ".xlsx":
         return _frame_result(pd.read_excel(io.BytesIO(content)))
     if extension == ".json":

@@ -1,11 +1,17 @@
 import pytest
+from sqlalchemy import select
+
+from app.core.database import SessionLocal
+from app.models import Pulse, Upload
 
 
 def test_health(client):
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["status"] == "healthy"
-    assert response.json()["business_storage"] == "postgres"
+    assert response.json() == {
+        "status": "ok",
+        "database": "postgresql",
+    }
 
 
 @pytest.mark.parametrize(
@@ -56,6 +62,18 @@ def test_register_and_upload_csv(client):
     assert response.json()["metrics"]["revenue"] == 55842
     assert response.json()["score"] > 0
 
+    with SessionLocal() as session:
+        persisted_upload = session.scalar(
+            select(Upload).where(Upload.filename == "june.csv")
+        )
+        assert persisted_upload is not None
+        assert persisted_upload.normalized_data["records"][0]["revenue"] == 55842
+        persisted_pulse = session.scalar(
+            select(Pulse).where(Pulse.upload_id == persisted_upload.id)
+        )
+        assert persisted_pulse is not None
+        assert persisted_pulse.metrics["revenue"] == 55842
+
     headers = {"Authorization": f"Bearer {token}"}
     uploads = client.get("/api/v1/uploads", headers=headers)
     assert uploads.status_code == 200
@@ -88,6 +106,38 @@ def test_register_and_upload_csv(client):
     }
     assert client.get("/api/v1/uploads", headers=second_headers).json() == []
     assert client.get("/api/v1/pulse/latest", headers=second_headers).status_code == 404
+
+    login = client.post(
+        "/api/v1/auth/login",
+        data={"username": "maya@example.com", "password": "strong-password"},
+    )
+    refreshed_headers = {
+        "Authorization": f"Bearer {login.json()['access_token']}",
+    }
+    persisted_uploads = client.get("/api/v1/uploads", headers=refreshed_headers)
+    assert persisted_uploads.status_code == 200
+    assert persisted_uploads.json()[0]["filename"] == "june.csv"
+
+
+def test_invalid_csv_returns_a_clear_validation_error(client):
+    auth = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "invalid-upload@example.com",
+            "full_name": "Invalid Upload",
+            "password": "strong-password",
+        },
+    )
+    response = client.post(
+        "/api/v1/uploads",
+        headers={"Authorization": f"Bearer {auth.json()['access_token']}"},
+        files={"file": ("empty.csv", b"", "text/csv")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "The CSV is empty or does not contain readable columns."
+    )
 
 
 def test_register_login_and_authenticated_session(client):

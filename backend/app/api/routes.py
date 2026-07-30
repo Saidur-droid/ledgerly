@@ -119,9 +119,9 @@ async def upload_business_data(
             },
             metrics=parsed.metrics,
         )
-        warehouse_metrics = store.get_metrics(user_id=user.id, upload_id=upload.id)
+        stored_metrics = store.get_metrics(user_id=user.id, upload_id=upload.id)
         previous = store.previous_pulse(user_id=user.id, upload_id=upload.id)
-        pulse_result = calculate_pulse(warehouse_metrics, upload.confidence)
+        pulse_result = calculate_pulse(stored_metrics, upload.confidence)
         pulse = StoredPulse(
             upload_id=upload.id,
             score=pulse_result.score,
