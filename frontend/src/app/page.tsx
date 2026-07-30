@@ -50,6 +50,7 @@ import {
   updateProfile,
   uploadBusinessData,
 } from "@/lib/api";
+import { ChatMarkdown } from "@/components/chat-markdown";
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set(["csv", "xlsx", "pdf", "json"]);
@@ -635,8 +636,8 @@ export default function Dashboard() {
         <div className="chat-header"><div><span className="bot-icon"><Bot size={18} /></span><span><strong>Ask Ledgerly</strong><small><i />Ready with your business context</small></span></div><button onClick={() => setChatOpen(false)}><X size={18} /></button></div>
         <div className="chat-context"><Sparkles size={14} /><span>Answering only from <strong>your latest uploaded data</strong></span></div>
         <div className="messages">
-          {messages.map((message, index) => <div key={`${message.role}-${index}`} className={`message ${message.role}`}><p>{message.text}</p>{message.role === "assistant" && livePulse && <small>Based on your latest persisted upload · {confidenceLabel}</small>}</div>)}
-          {chatLoading && <div className="message assistant"><p>Reading your business data...</p></div>}
+          {messages.map((message, index) => <div key={`${message.role}-${index}`} className={`message ${message.role}`}>{message.role === "assistant" ? <ChatMarkdown content={message.text} /> : <div className="message-content"><p>{message.text}</p></div>}{message.role === "assistant" && livePulse && <small>Based on your latest persisted upload · {confidenceLabel}</small>}</div>)}
+          {chatLoading && <div className="message assistant"><ChatMarkdown content="Reading your business data..." /></div>}
           {messages.length === 1 && livePulse && <div className="quick-questions">{quickQuestions.map((item) => <button key={item} disabled={chatLoading} onClick={() => submitQuestion(item)}>{item}</button>)}</div>}
         </div>
         <div className="chat-composer"><textarea disabled={!livePulse || chatLoading} value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitQuestion(); } }} placeholder={livePulse ? "Ask about your business..." : "Upload business data to start asking questions"} /><button disabled={!livePulse || chatLoading || !question.trim()} onClick={() => submitQuestion()}><Send size={16} /></button><small>Ledgerly explains your data — it doesn&apos;t give financial advice.</small></div>

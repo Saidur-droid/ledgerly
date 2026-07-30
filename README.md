@@ -89,6 +89,13 @@ required values are present. Ask Ledgerly can use those persisted rows for
 totals, best/worst-period ranking, trends, seasonality, margins, cash, risks,
 historical projections, and transparent scenarios.
 
+Best/worst period rankings use a backend-owned composite score:
+`40% profit + 35% net margin + 25% revenue growth`. Each input is min-max
+normalized across the persisted periods before weighting. The first
+chronological period receives a neutral growth score of `0.50` because it has
+no preceding period. The API includes this methodology in the Markdown answer,
+and the frontend renders it without maintaining a second copy of the weights.
+
 A column named `cash`, `cash balance`, or another balance-style alias is treated
 as a period-ending balance. The latest dated balance is the headline cash KPI;
 Ledgerly also retains its average, minimum, maximum, and first-to-latest change,
