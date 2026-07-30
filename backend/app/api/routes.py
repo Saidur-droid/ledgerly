@@ -9,7 +9,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.ai.service import DISCLAIMER, answer_business_question
+from app.ai.service import answer_business_question
 from app.ai.contract import serialize_ask_response
 from app.business_engine.parser import parse_business_file
 from app.business_engine.storage import (
@@ -214,13 +214,11 @@ def chat(
         "factors": pulse.factors,
         "data": upload.normalized_data,
     }
-    answer, confidence = answer_business_question(payload.question, context)
+    result = answer_business_question(payload.question, context)
     return serialize_ask_response(
-        answer,
+        result.answer,
         correlation_id=uuid4().hex,
-        confidence=confidence,
-        sources=[upload.filename],
-        disclaimer=DISCLAIMER,
+        policy_notice=result.policy_notice,
     )
 
 

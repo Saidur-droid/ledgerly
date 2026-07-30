@@ -1,19 +1,16 @@
 {
   "markdown": {
     "schema_version": 1,
-    "response_type": "markdown",
+    "type": "markdown",
     "correlation_id": "fixture-markdown",
-    "markdown": "## Revenue\n\n**Revenue:** $100,000\n\n[Safe link](https://example.com)",
-    "sections": [],
-    "confidence": "data-grounded",
-    "sources": ["sample.csv"],
-    "disclaimer": "Ledgerly explains uploaded business data only."
+    "content": "## Revenue\n\n**Revenue:** $100,000\n\n[Safe link](https://example.com)",
+    "sections": []
   },
   "structured": {
     "schema_version": 1,
-    "response_type": "structured",
+    "type": "structured",
     "correlation_id": "fixture-structured",
-    "markdown": null,
+    "content": null,
     "sections": [
       {
         "type": "text",
@@ -86,9 +83,6 @@
         "tone": "info",
         "message": "This analysis explains uploaded data only."
       }
-    ],
-    "confidence": "data-grounded",
-    "sources": ["sample_business_data.csv"],
-    "disclaimer": "Ledgerly explains uploaded business data only."
+    ]
   }
 }

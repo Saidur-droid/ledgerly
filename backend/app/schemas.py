@@ -192,23 +192,26 @@ AnalysisSection = Annotated[
 
 class ChatResponse(ContractModel):
     schema_version: Literal[1] = 1
-    response_type: Literal["markdown", "structured"]
-    correlation_id: str = Field(min_length=8, max_length=64, pattern=r"^[a-zA-Z0-9-]+$")
-    markdown: LongText | None = None
+    type: Literal["markdown", "structured", "policy_notice", "error"]
+    content: LongText | None = None
     sections: list[AnalysisSection] = Field(default_factory=list, max_length=24)
-    confidence: str = Field(min_length=1, max_length=80)
-    sources: list[ShortText] = Field(max_length=20)
-    disclaimer: ShortText
+    correlation_id: str = Field(min_length=8, max_length=64, pattern=r"^[a-zA-Z0-9-]+$")
 
     @model_validator(mode="after")
-    def response_type_matches_content(self) -> "ChatResponse":
-        if self.response_type == "markdown":
-            if self.markdown is None or self.sections:
+    def type_matches_content(self) -> "ChatResponse":
+        if self.type == "markdown":
+            if self.content is None or self.sections:
                 raise ValueError(
-                    "Markdown responses require markdown and cannot contain sections."
+                    "Markdown responses require content and cannot contain sections."
                 )
-        elif self.markdown is not None:
-            raise ValueError("Structured responses cannot contain markdown.")
+        elif self.type == "structured":
+            if self.content is not None:
+                raise ValueError("Structured responses cannot contain content.")
+        elif self.type == "policy_notice":
+            if self.content is None:
+                raise ValueError("Policy notices require content.")
+        elif self.content is None or self.sections:
+            raise ValueError("Error responses require content and no sections.")
         return self
 
 

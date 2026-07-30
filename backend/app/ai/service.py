@@ -1,59 +1,57 @@
 import json
-import re
+from dataclasses import dataclass
 
 from google import genai
 
 from app.ai.analysis import deterministic_answer
+from app.ai.policy import route_policy
 from app.core.config import get_settings
 
-PROHIBITED = re.compile(
-    r"\b(should i|recommend|advice|invest|investment|stock|crypto|price|pricing|hire|hiring|fire|guarantee|forecast outcome)\b",
-    re.IGNORECASE,
-)
-DISCLAIMER = "Ledgerly explains uploaded business data only and does not provide financial advice."
-SYSTEM_INSTRUCTION = """You are Ledgerly, a careful business-data explainer.
-Use only the supplied uploaded-data context. Explain, summarize, compare, and identify trends.
-Never give investment, pricing, hiring, or financial recommendations. Never guarantee outcomes.
-State when the data is insufficient. Keep the answer clear, concise, and evidence-based."""
+SYSTEM_INSTRUCTION = """You are Ledgerly, a careful business-data analyst.
+Use only the supplied uploaded-data context. Explain totals, reconcile periods,
+compare performance, identify trends and seasonality, model transparent
+scenarios, produce cautious forecasts, rank observed risks, and suggest
+operational data-review actions.
+Do not guarantee outcomes or provide personalized investment, legal, or tax
+advice. Clearly state unavailable-data limitations. Keep every claim grounded
+in the uploaded rows and return Markdown text only."""
 
 
-def _fallback_answer(question: str, context: dict) -> str | dict:
-    analyzed = deterministic_answer(question, context)
-    if analyzed is not None:
-        return analyzed
-    metrics = context.get("metrics", {})
-    if not metrics:
-        return "I could not identify enough structured metrics in the latest upload to answer that confidently."
-    rendered = ", ".join(f"{name.replace('_', ' ')}: {value:,.2f}" for name, value in metrics.items())
-    return (
-        f"The latest persisted upload shows {rendered}. Ask about totals, best "
-        "and worst periods, trends, seasonality, margins, cash, risks, forecasts, "
-        "or scenarios for a focused analysis."
-    )
+@dataclass(frozen=True)
+class AnalysisResult:
+    answer: str | dict
+    policy_notice: str | None = None
 
 
-def answer_business_question(
-    question: str,
-    context: dict,
-) -> tuple[str | dict, str]:
-    if PROHIBITED.search(question):
-        return (
-            "I can explain what your uploaded data shows, but I can’t provide investment, pricing, hiring, or outcome-guarantee advice.",
-            "policy-limited",
-        )
-    analyzed = deterministic_answer(question, context)
-    if analyzed is not None:
-        return analyzed, "data-grounded"
+def _provider_answer(question: str, context: dict) -> str | None:
     settings = get_settings()
     if not settings.gemini_api_key:
-        return _fallback_answer(question, context), "data-grounded"
+        return None
     try:
         client = genai.Client(api_key=settings.gemini_api_key)
-        prompt = f"{SYSTEM_INSTRUCTION}\n\nDATA CONTEXT:\n{json.dumps(context, default=str)[:25000]}\n\nQUESTION:\n{question}"
+        prompt = (
+            f"{SYSTEM_INSTRUCTION}\n\nDATA CONTEXT:\n"
+            f"{json.dumps(context, default=str)[:25000]}\n\nQUESTION:\n{question}"
+        )
         response = client.models.generate_content(
             model=settings.gemini_model,
             contents=prompt,
         )
     except Exception:
-        return _fallback_answer(question, context), "data-grounded"
-    return response.text or _fallback_answer(question, context), "high"
+        return None
+    return response.text or None
+
+
+def answer_business_question(question: str, context: dict) -> AnalysisResult:
+    policy = route_policy(question)
+    analysis_question = (
+        f"{question}\nProvide a cautious historical forecast."
+        if policy.requires_forecast
+        else question
+    )
+    analyzed = deterministic_answer(analysis_question, context)
+    if analyzed is None:
+        analyzed = _provider_answer(analysis_question, context)
+    if analyzed is None:
+        analyzed = deterministic_answer("Provide a CFO-style business review.", context)
+    return AnalysisResult(answer=analyzed, policy_notice=policy.notice)

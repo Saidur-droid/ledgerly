@@ -152,26 +152,37 @@ export type AnalysisSection =
 type ChatResponseBase = {
   schema_version: 1;
   correlation_id: string;
-  confidence: string;
-  sources: string[];
-  disclaimer: string;
 };
 
 export type MarkdownChatResponse = ChatResponseBase & {
-  response_type: "markdown";
-  markdown: string;
+  type: "markdown";
+  content: string;
   sections: [];
 };
 
 export type StructuredChatResponse = ChatResponseBase & {
-  response_type: "structured";
-  markdown: null;
+  type: "structured";
+  content: null;
   sections: AnalysisSection[];
+};
+
+export type PolicyNoticeChatResponse = ChatResponseBase & {
+  type: "policy_notice";
+  content: string;
+  sections: AnalysisSection[];
+};
+
+export type ErrorChatResponse = ChatResponseBase & {
+  type: "error";
+  content: string;
+  sections: [];
 };
 
 export type AskLedgerlyResponse =
   | MarkdownChatResponse
-  | StructuredChatResponse;
+  | StructuredChatResponse
+  | PolicyNoticeChatResponse
+  | ErrorChatResponse;
 
 const RESPONSE_LIMITS = {
   sections: 24,
@@ -288,18 +299,25 @@ function isSection(value: unknown): value is AnalysisSection {
 
 export function parseAskLedgerlyResponse(value: unknown): AskLedgerlyResponse | null {
   if (!isRecord(value) ||
-    !hasOnlyKeys(value, ["schema_version", "response_type", "correlation_id", "markdown", "sections", "confidence", "sources", "disclaimer"]) ||
+    !hasOnlyKeys(value, ["schema_version", "type", "content", "sections", "correlation_id"]) ||
     value.schema_version !== 1 || !isText(value.correlation_id, 64) ||
-    !isText(value.confidence, 80) || !isStringList(value.sources, 20) ||
-    !isText(value.disclaimer, 500) || !Array.isArray(value.sections) ||
+    !Array.isArray(value.sections) ||
     value.sections.length > RESPONSE_LIMITS.sections) return null;
-  if (value.response_type === "markdown") {
-    return isText(value.markdown) && value.sections.length === 0
+  if (value.type === "markdown") {
+    return isText(value.content) && value.sections.length === 0
       ? value as MarkdownChatResponse : null;
   }
-  if (value.response_type === "structured") {
-    return value.markdown === null && value.sections.every(isSection)
+  if (value.type === "structured") {
+    return value.content === null && value.sections.every(isSection)
       ? value as StructuredChatResponse : null;
+  }
+  if (value.type === "policy_notice") {
+    return isText(value.content) && value.sections.every(isSection)
+      ? value as PolicyNoticeChatResponse : null;
+  }
+  if (value.type === "error") {
+    return isText(value.content) && value.sections.length === 0
+      ? value as ErrorChatResponse : null;
   }
   return null;
 }
@@ -307,13 +325,10 @@ export function parseAskLedgerlyResponse(value: unknown): AskLedgerlyResponse | 
 export function localMarkdownResponse(markdown: string): MarkdownChatResponse {
   return {
     schema_version: 1,
-    response_type: "markdown",
+    type: "markdown",
     correlation_id: "local-ui",
-    markdown,
+    content: markdown,
     sections: [],
-    confidence: "local",
-    sources: [],
-    disclaimer: "Ledgerly explains uploaded business data only.",
   };
 }
 export class ApiError extends Error {

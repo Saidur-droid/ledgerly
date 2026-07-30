@@ -114,13 +114,20 @@ function SectionRenderer({ section }: { section: AnalysisSection }) {
 }
 
 function ValidatedResponse({ response }: { response: AskLedgerlyResponse }) {
-  switch (response.response_type) {
-    case "markdown": return <ChatMarkdown content={response.markdown} />;
+  switch (response.type) {
+    case "markdown": return <ChatMarkdown content={response.content} />;
     case "structured":
       return <div className="message-content structured-analysis">
         {response.sections.map((section, index) => <SectionRenderer section={section} key={`${section.type}-${index}`} />)}
         {response.sections.length === 0 && <p>No analysis details were returned.</p>}
       </div>;
+    case "policy_notice":
+      return <div className="message-content structured-analysis">
+        {response.sections.map((section, index) => <SectionRenderer section={section} key={`${section.type}-${index}`} />)}
+        <section className="analysis-notice policy" role="status"><h3>Scope notice</h3><p>{response.content}</p></section>
+      </div>;
+    case "error":
+      return <div className="message-content unsupported-chat-response" role="alert"><p>{response.content}</p></div>;
     default: return assertNever(response);
   }
 }

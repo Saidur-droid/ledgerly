@@ -36,6 +36,22 @@ SCENARIO_ANALYSIS = re.compile(
     r"\b(scenario|what if|sensitivity)\b",
     re.IGNORECASE,
 )
+RECONCILIATION_ANALYSIS = re.compile(
+    r"\b(reconcile|reconciliation|each monthly row|all monthly rows|month by month)\b",
+    re.IGNORECASE,
+)
+CFO_ANALYSIS = re.compile(
+    r"\b(cfo|executive review|management review|board summary)\b",
+    re.IGNORECASE,
+)
+ACTION_ANALYSIS = re.compile(
+    r"\b(action plan|30[/ -]60[/ -]90|recommend|operational action|next steps?)\b",
+    re.IGNORECASE,
+)
+PRICING_OR_HIRING = re.compile(
+    r"\b(pric(?:e|ing)|hir(?:e|ing)|headcount|staffing)\b",
+    re.IGNORECASE,
+)
 RANKING_WEIGHTS = {
     "profit": 0.40,
     "net_margin": 0.35,
@@ -100,6 +116,7 @@ def _periods(context: dict[str, Any]) -> list[dict[str, Any]]:
                 "profit": profit,
                 "net_margin": margin,
                 "revenue_growth": _number(source.get("revenue_growth")),
+                "cash": _number(source.get("cash")),
             }
         )
     periods.sort(key=lambda item: (_date(item["date"]) is None, _date(item["date"]) or item["position"]))
@@ -203,38 +220,29 @@ def _period_section(
     periods: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
+        "type": "table",
         "heading": title,
-        "table": {
-            "columns": [
-                {"key": "rank", "label": "Rank", "align": "right"},
-                {"key": "month", "label": "Month", "align": "left"},
-                {"key": "revenue", "label": "Revenue", "align": "right"},
-                {"key": "expenses", "label": "Expenses", "align": "right"},
-                {"key": "profit", "label": "Profit", "align": "right"},
-                {
-                    "key": "net_margin",
-                    "label": "Net margin",
-                    "align": "right",
-                },
-                {
-                    "key": "revenue_growth",
-                    "label": "Revenue growth",
-                    "align": "right",
-                },
-            ],
-            "rows": [
-                {
-                    "rank": rank,
-                    "month": period["label"],
-                    "revenue": _money(period["revenue"]),
-                    "expenses": _money(period["expenses"]),
-                    "profit": _money(period["profit"]),
-                    "net_margin": _percent(period["net_margin"]),
-                    "revenue_growth": _percent(period["revenue_growth"]),
-                }
-                for rank, period in enumerate(periods, 1)
-            ],
-        },
+        "columns": [
+            {"label": "Rank", "align": "right"},
+            {"label": "Month", "align": "left"},
+            {"label": "Revenue", "align": "right"},
+            {"label": "Expenses", "align": "right"},
+            {"label": "Profit", "align": "right"},
+            {"label": "Net margin", "align": "right"},
+            {"label": "Revenue growth", "align": "right"},
+        ],
+        "rows": [
+            [
+                rank,
+                period["label"],
+                _money(period["revenue"]),
+                _money(period["expenses"]),
+                _money(period["profit"]),
+                _percent(period["net_margin"]),
+                _percent(period["revenue_growth"]),
+            ]
+            for rank, period in enumerate(periods, 1)
+        ],
     }
 
 
@@ -261,37 +269,46 @@ def _best_worst_answer(periods: list[dict[str, Any]]) -> str | dict[str, Any]:
     if worst:
         sections.append(_period_section(f"{len(worst)} worst months", worst))
     return {
-        "kind": "structured_analysis",
-        "title": "Monthly performance ranking",
-        "summary": (
-            f"I analyzed {len(ranked)} persisted rows from "
-            f"{_range_description(periods)}."
-        ),
-        "sections": sections,
-        "scoring": {
-            "formula": RANKING_FORMULA,
-            "weights": {
-                metric: round(weight * 100, 2)
-                for metric, weight in RANKING_WEIGHTS.items()
+        "type": "structured",
+        "content": None,
+        "sections": [
+            {
+                "type": "text",
+                "heading": "Monthly performance ranking",
+                "markdown": (
+                    f"I analyzed **{len(ranked)} persisted rows** from "
+                    f"{_range_description(periods)}."
+                ),
             },
-            "normalization": (
-                "Each input is min–max normalized to a 0–1 score across the "
-                "persisted months before its weight is applied. Negative growth "
-                "remains negative before normalization and is ranked relative "
-                "to the other observed growth values."
-            ),
-            "first_period": (
-                "The first chronological month has no prior-period growth "
-                f"value, so it receives a neutral normalized growth score of "
-                f"{MISSING_GROWTH_SCORE:.2f}."
-            ),
-            "interpretation": (
-                "Rankings use a composite score, so the highest-profit month "
-                "may not rank first when its margin or growth is weaker."
-            ),
-        },
-        "risks": [],
-        "action_plan": [],
+            *sections,
+            {
+                "type": "text",
+                "heading": "Ranking method",
+                "markdown": (
+                    f"**Composite score:** `{RANKING_FORMULA}`\n\n"
+                    "Each input is min–max normalized to a 0–1 score across the "
+                    "persisted months before its weight is applied. Negative "
+                    "growth remains negative before normalization and is ranked "
+                    "relative to the other observed growth values.\n\n"
+                    "The first chronological month has no prior-period growth "
+                    f"value, so it receives a neutral normalized growth score "
+                    f"of {MISSING_GROWTH_SCORE:.2f}.\n\n"
+                    "Rankings use a composite score, so the highest-profit month "
+                    "may not rank first when its margin or growth is weaker."
+                ),
+            },
+            {
+                "type": "metrics",
+                "heading": "Ranking weights",
+                "items": [
+                    {
+                        "label": metric.replace("_", " ").title(),
+                        "value": f"{weight * 100:.0f}%",
+                    }
+                    for metric, weight in RANKING_WEIGHTS.items()
+                ],
+            },
+        ],
     }
 
 
@@ -425,7 +442,7 @@ def _cash_answer(context: dict[str, Any]) -> str:
     )
 
 
-def _risk_answer(periods: list[dict[str, Any]]) -> str:
+def _risk_answer(periods: list[dict[str, Any]]) -> dict[str, Any]:
     losses = [period for period in periods if period["profit"] is not None and period["profit"] < 0]
     declines = [
         period
@@ -437,19 +454,49 @@ def _risk_answer(periods: list[dict[str, Any]]) -> str:
         if declines
         else None
     )
-    answer = (
-        f"Data flags in the current upload: {len(losses)} loss-making period(s) "
-        f"and {len(declines)} period(s) with declining revenue."
-    )
-    if worst_growth is not None:
-        answer += (
-            f" The steepest revenue decline was {_percent(worst_growth['revenue_growth'])} "
-            f"in {worst_growth['label']}."
-        )
-    return answer + " These are observed data patterns, not financial recommendations."
+    risks = [
+        {
+            "label": "Loss-making periods",
+            "detail": f"{len(losses)} period(s) had negative profit.",
+            "severity": "high" if losses else "low",
+        },
+        {
+            "label": "Revenue declines",
+            "detail": (
+                f"{len(declines)} period(s) had negative revenue growth."
+                + (
+                    f" The steepest decline was "
+                    f"{_percent(worst_growth['revenue_growth'])} in "
+                    f"{worst_growth['label']}."
+                    if worst_growth is not None
+                    else ""
+                )
+            ),
+            "severity": "medium" if declines else "low",
+        },
+    ]
+    return {
+        "type": "structured",
+        "content": None,
+        "sections": [
+            {
+                "type": "text",
+                "heading": "Observed risk review",
+                "markdown": (
+                    "Risks are ranked from patterns in the persisted rows; "
+                    "they are not predictions or regulated recommendations."
+                ),
+            },
+            {
+                "type": "risks",
+                "heading": "Ranked data risks",
+                "items": risks,
+            },
+        ],
+    }
 
 
-def _forecast_answer(periods: list[dict[str, Any]]) -> str:
+def _forecast_answer(periods: list[dict[str, Any]]) -> str | dict[str, Any]:
     revenue_periods = [period for period in periods if period["revenue"] is not None]
     growth_rates = [
         period["revenue_growth"]
@@ -461,16 +508,31 @@ def _forecast_answer(periods: list[dict[str, Any]]) -> str:
     latest = revenue_periods[-1]
     average_growth = sum(growth_rates) / len(growth_rates)
     projected = latest["revenue"] * (1 + average_growth / 100)
-    return (
-        f"A simple one-period run-rate projection using the average of the latest "
-        f"{len(growth_rates)} observed growth rates ({_percent(average_growth)}) "
-        f"would place revenue at {_money(projected)}, versus "
-        f"{_money(latest['revenue'])} in {latest['label']}. This is a mechanical "
-        "historical projection, not a guarantee or financial recommendation."
-    )
+    return {
+        "type": "structured",
+        "content": None,
+        "sections": [{
+            "type": "forecast",
+            "heading": "Historical run-rate forecast",
+            "summary": (
+                "A cautious one-period projection based on uploaded historical "
+                "growth; it is not a guarantee."
+            ),
+            "horizon": "One period",
+            "methodology": (
+                f"Average of the latest {len(growth_rates)} observed growth "
+                f"rates ({_percent(average_growth)})."
+            ),
+            "metrics": [
+                {"label": "Latest revenue", "value": _money(latest["revenue"])},
+                {"label": "Projected revenue", "value": _money(projected)},
+            ],
+            "caveats": ["Uploaded historical growth may not repeat."],
+        }],
+    }
 
 
-def _scenario_answer(context: dict[str, Any], question: str) -> str:
+def _scenario_answer(context: dict[str, Any], question: str) -> str | dict[str, Any]:
     metrics = context.get("metrics", {})
     revenue = _number(metrics.get("revenue"))
     expenses = _number(metrics.get("expenses"))
@@ -481,13 +543,73 @@ def _scenario_answer(context: dict[str, Any], question: str) -> str:
     scenario_revenue = revenue * (1 + change / 100)
     scenario_profit = scenario_revenue - expenses
     scenario_margin = scenario_profit / scenario_revenue * 100 if scenario_revenue else None
-    return (
-        f"Illustrative scenario: if revenue changed by {change:+.2f}% while "
-        f"expenses stayed at {_money(expenses)}, revenue would be "
-        f"{_money(scenario_revenue)}, profit would be {_money(scenario_profit)}, "
-        f"and net margin would be {_percent(scenario_margin)}. This only explains "
-        "the stated assumptions and is not a recommendation."
-    )
+    return {
+        "type": "structured",
+        "content": None,
+        "sections": [{
+            "type": "scenarios",
+            "heading": "Scenario analysis",
+            "scenarios": [{
+                "name": f"Revenue {change:+.2f}%",
+                "assumptions": [
+                    f"Expenses remain {_money(expenses)}.",
+                    "All other uploaded relationships remain unchanged.",
+                ],
+                "outcomes": [
+                    {"label": "Revenue", "value": _money(scenario_revenue)},
+                    {"label": "Profit", "value": _money(scenario_profit)},
+                    {"label": "Net margin", "value": _percent(scenario_margin)},
+                ],
+            }],
+        }],
+    }
+
+
+def _reconciliation_answer(
+    periods: list[dict[str, Any]],
+) -> str | dict[str, Any]:
+    if not periods:
+        return "The latest upload does not contain row-level periods to reconcile."
+    return {
+        "type": "structured",
+        "content": None,
+        "sections": [
+            {
+                "type": "text",
+                "heading": "Monthly reconciliation",
+                "markdown": (
+                    f"I reconciled **{len(periods)} chronological rows** from "
+                    f"{_range_description(periods)}. Profit equals revenue minus "
+                    "expenses where both values are available."
+                ),
+            },
+            {
+                "type": "table",
+                "heading": "Persisted monthly rows",
+                "columns": [
+                    {"label": "Month", "align": "left"},
+                    {"label": "Revenue", "align": "right"},
+                    {"label": "Expenses", "align": "right"},
+                    {"label": "Profit", "align": "right"},
+                    {"label": "Net margin", "align": "right"},
+                    {"label": "Revenue growth", "align": "right"},
+                    {"label": "Ending cash", "align": "right"},
+                ],
+                "rows": [
+                    [
+                        period["label"],
+                        _money(period["revenue"]),
+                        _money(period["expenses"]),
+                        _money(period["profit"]),
+                        _percent(period["net_margin"]),
+                        _percent(period["revenue_growth"]),
+                        _money(period["cash"]),
+                    ]
+                    for period in periods
+                ],
+            },
+        ],
+    }
 
 
 def _comprehensive_answer(
@@ -497,30 +619,6 @@ def _comprehensive_answer(
 ) -> dict[str, Any]:
     ranked = _rank_scores(periods)
     best, worst = _ranking_groups(ranked)
-    columns = [
-        {"label": "Rank", "align": "right"},
-        {"label": "Month", "align": "left"},
-        {"label": "Revenue", "align": "right"},
-        {"label": "Expenses", "align": "right"},
-        {"label": "Profit", "align": "right"},
-        {"label": "Net margin", "align": "right"},
-        {"label": "Revenue growth", "align": "right"},
-    ]
-
-    def ranking_rows(items: list[dict[str, Any]]) -> list[list[Any]]:
-        return [
-            [
-                rank,
-                item["label"],
-                _money(item["revenue"]),
-                _money(item["expenses"]),
-                _money(item["profit"]),
-                _percent(item["net_margin"]),
-                _percent(item["revenue_growth"]),
-            ]
-            for rank, item in enumerate(items, 1)
-        ]
-
     metrics = context.get("metrics", {})
     revenue = _number(metrics.get("revenue"))
     expenses = _number(metrics.get("expenses"))
@@ -558,8 +656,8 @@ def _comprehensive_answer(
         if item["revenue_growth"] is not None and item["revenue_growth"] < 0
     ]
     return {
-        "response_type": "structured",
-        "markdown": None,
+        "type": "structured",
+        "content": None,
         "sections": [
             {
                 "type": "text",
@@ -569,18 +667,8 @@ def _comprehensive_answer(
                     f"{_range_description(periods)}."
                 ),
             },
-            {
-                "type": "table",
-                "heading": f"{len(best)} best months",
-                "columns": [dict(column) for column in columns],
-                "rows": ranking_rows(best),
-            },
-            {
-                "type": "table",
-                "heading": f"{len(worst)} worst months",
-                "columns": [dict(column) for column in columns],
-                "rows": ranking_rows(worst),
-            },
+            _period_section(f"{len(best)} best months", best),
+            _period_section(f"{len(worst)} worst months", worst),
             {
                 "type": "text",
                 "heading": "Ranking method",
@@ -665,6 +753,82 @@ def _comprehensive_answer(
     }
 
 
+def _cfo_answer(
+    context: dict[str, Any],
+    question: str,
+    periods: list[dict[str, Any]],
+) -> dict[str, Any]:
+    response = _comprehensive_answer(context, question, periods)
+    metrics = context.get("metrics", {})
+    response["sections"].insert(
+        1,
+        {
+            "type": "metrics",
+            "heading": "Executive metrics",
+            "items": [
+                {"label": "Revenue", "value": _money(_number(metrics.get("revenue")))},
+                {"label": "Expenses", "value": _money(_number(metrics.get("expenses")))},
+                {"label": "Profit", "value": _money(_number(metrics.get("profit")))},
+                {
+                    "label": "Net margin",
+                    "value": _percent(_number(metrics.get("net_margin"))),
+                },
+                {
+                    "label": "Latest ending cash",
+                    "value": _money(_number(metrics.get("cash"))),
+                    "detail": "Ending balance; not summed across periods.",
+                },
+            ],
+        },
+    )
+    response["sections"].insert(
+        -1,
+        {
+            "type": "text",
+            "heading": "Cash interpretation",
+            "markdown": _cash_answer(context),
+        },
+    )
+    action_section = next(
+        section
+        for section in response["sections"]
+        if section["type"] == "actions"
+    )
+    action_section["heading"] = "30/60/90-day data action plan"
+    action_section["items"] = [
+        {
+            "label": "First 30 days — reconcile",
+            "detail": "Validate the lowest-ranked and declining monthly source rows.",
+            "priority": "high",
+        },
+        {
+            "label": "By 60 days — compare",
+            "detail": "Upload the next period and compare revenue, margin, and ending cash.",
+            "priority": "medium",
+        },
+        {
+            "label": "By 90 days — review patterns",
+            "detail": "Reassess seasonality, forecast error, and repeated risk flags.",
+            "priority": "medium",
+        },
+    ]
+    if PRICING_OR_HIRING.search(question):
+        response["sections"].append(
+            {
+                "type": "notice",
+                "tone": "info",
+                "heading": "Available-data boundary",
+                "message": (
+                    "The upload has no unit-price, volume, headcount, payroll, "
+                    "or capacity fields. Ledgerly can explain financial patterns "
+                    "but cannot quantify pricing or hiring effects without those "
+                    "inputs."
+                ),
+            }
+        )
+    return response
+
+
 def deterministic_answer(
     question: str,
     context: dict[str, Any],
@@ -684,6 +848,17 @@ def deterministic_answer(
     )
     if complex_intents >= 3:
         return _comprehensive_answer(context, question, periods)
+    if (
+        CFO_ANALYSIS.search(question)
+        or ACTION_ANALYSIS.search(question)
+        or PRICING_OR_HIRING.search(question)
+    ):
+        return _cfo_answer(context, question, periods)
+    if (
+        RECONCILIATION_ANALYSIS.search(question)
+        and not PERIOD_ANALYSIS.search(question)
+    ):
+        return _reconciliation_answer(periods)
     if PERIOD_ANALYSIS.search(question):
         return _best_worst_answer(periods)
     if SEASONALITY_ANALYSIS.search(question):
