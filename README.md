@@ -19,8 +19,9 @@ Ledgerly turns uploaded business data into detected KPIs, an explainable
 Business Pulse™, historical comparisons, bounded AI explanations, an
 interactive dashboard, and a downloadable PDF report.
 
-Ledgerly explains uploaded data. It does not provide investment, pricing,
-hiring, or financial advice, and it does not guarantee outcomes.
+Ledgerly explains uploaded data, models transparent scenarios, produces
+cautious forecasts, and suggests operational data-review actions. It does not
+guarantee outcomes or provide personalized investment, legal, or tax advice.
 
 ## Product flow
 
@@ -97,11 +98,12 @@ chronological period receives a neutral growth score of `0.50` because it has
 no preceding period. The API includes this methodology in the Markdown answer,
 and the frontend renders it without maintaining a second copy of the weights.
 
-Ask Ledgerly responses use one strict versioned envelope. Schema version `1`
-discriminates `markdown` responses from `structured` responses. Structured
-content is limited to explicit `text`, `metrics`, `table`, `list`, `scenarios`,
-`forecast`, `risks`, `actions`, and `notice` sections; table cells can contain
-only JSON primitives.
+Ask Ledgerly responses use one strict versioned envelope with only
+`schema_version`, `type`, `content`, `sections`, and `correlation_id`. Schema
+version `1` discriminates `markdown`, `structured`, `policy_notice`, and
+`error` responses. Structured content is limited to explicit `text`, `metrics`,
+`table`, `list`, `scenarios`, `forecast`, `risks`, `actions`, and `notice`
+sections; table cells can contain only JSON primitives.
 
 The backend validates and size-checks every envelope through one adapter before
 returning it. The frontend validates the same contract at the network boundary
@@ -398,8 +400,10 @@ coverage, run the complete quality gate, and use Conventional Commits.
 
 <details>
 <summary><strong>Does Ledgerly provide financial advice?</strong></summary>
-No. Ledgerly explains and compares uploaded data. It does not recommend
-investments, prices, or hiring decisions and does not guarantee outcomes.
+Ledgerly can explain operational pricing or hiring implications only when the
+upload contains the required price, volume, headcount, payroll, or capacity
+fields. It does not guarantee outcomes or provide personalized investment,
+legal, or tax advice.
 </details>
 
 <details>

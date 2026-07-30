@@ -118,15 +118,15 @@ def test_chat_questions_use_persisted_rows_and_produce_distinct_answers(client):
 
     assert aggregate.status_code == 200
     assert period_analysis.status_code == 200
-    aggregate_answer = aggregate.json()["markdown"]
+    aggregate_answer = aggregate.json()["content"]
     period_answer = period_analysis.json()
     assert aggregate.json() != period_answer
     assert "$5,453,000.00" in aggregate_answer
     assert "$3,919,000.00" in aggregate_answer
     assert "$1,534,000.00" in aggregate_answer
     assert "28.13%" in aggregate_answer
-    assert aggregate.json()["response_type"] == "markdown"
-    assert period_answer["response_type"] == "structured"
+    assert aggregate.json()["type"] == "markdown"
+    assert period_answer["type"] == "structured"
     assert period_answer["schema_version"] == 1
     table_sections = [
         section for section in period_answer["sections"] if section["type"] == "table"
@@ -153,8 +153,6 @@ def test_chat_questions_use_persisted_rows_and_produce_distinct_answers(client):
     assert "min–max normalized" in ranking_method
     assert "highest-profit month may not rank first" in ranking_method
     assert "neutral normalized growth score of 0.50" in ranking_method
-    assert aggregate.json()["confidence"] == "data-grounded"
-    assert period_analysis.json()["confidence"] == "data-grounded"
 
 
 def test_cash_answer_uses_latest_balance_instead_of_sum(client):
@@ -168,7 +166,7 @@ def test_cash_answer_uses_latest_balance_instead_of_sum(client):
     )
 
     assert response.status_code == 200
-    answer = response.json()["markdown"]
+    answer = response.json()["content"]
     assert "Latest period-ending cash was $245,000.00" in answer
     assert "Average balance was $118,472.22" in answer
     assert "monthly balances are not summed" in answer
@@ -201,7 +199,7 @@ def test_chat_response_is_derived_from_current_upload_values(client):
     )
 
     assert response.status_code == 200
-    answer = response.json()["markdown"]
+    answer = response.json()["content"]
     assert "$7,770.00" in answer
     assert "$2,670.00" in answer
     assert "$5,100.00" in answer
@@ -316,23 +314,20 @@ def test_chat_response_schema_accepts_only_versioned_contract():
     common = {
         "schema_version": 1,
         "correlation_id": "contract-test",
-        "confidence": "data-grounded",
-        "sources": ["sample.csv"],
-        "disclaimer": "Explanation only.",
     }
     plain = ChatResponse.model_validate(
         {
             **common,
-            "response_type": "markdown",
-            "markdown": "**Revenue:** $100",
+            "type": "markdown",
+            "content": "**Revenue:** $100",
             "sections": [],
         }
     )
     structured = ChatResponse.model_validate(
         {
             **common,
-            "response_type": "structured",
-            "markdown": None,
+            "type": "structured",
+            "content": None,
             "sections": [{
                 "type": "forecast",
                 "heading": "Forecast",
@@ -343,15 +338,15 @@ def test_chat_response_schema_accepts_only_versioned_contract():
         }
     )
 
-    assert plain.markdown == "**Revenue:** $100"
-    assert structured.response_type == "structured"
+    assert plain.content == "**Revenue:** $100"
+    assert structured.type == "structured"
     assert structured.sections[0].heading == "Forecast"
     with pytest.raises(ValidationError):
         ChatResponse.model_validate(
             {
                 **common,
-                "response_type": "structured",
-                "markdown": None,
+                "type": "structured",
+                "content": None,
                 "sections": [{"type": "unexpected"}],
             }
         )

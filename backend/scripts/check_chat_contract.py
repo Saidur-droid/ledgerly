@@ -39,7 +39,7 @@ def main() -> int:
     for required in (
         "AskLedgerlyResponseRenderer",
         "assertNever",
-        "switch (response.response_type)",
+        "switch (response.type)",
         "switch (section.type)",
     ):
         if required not in renderer:

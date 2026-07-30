@@ -61,10 +61,10 @@ test("rejects malformed, unknown, version-mismatched, and nested payloads safely
     {},
     { ...fixtures.markdown as object, schema_version: 2 },
     { ...fixtures.structured as object, sections: [{ type: "unknown" }] },
-    { ...fixtures.markdown as object, markdown: { nested: true } },
+    { ...fixtures.markdown as object, content: { nested: true } },
     { ...fixtures.structured as object, sections: [{ type: "list", style: "bulleted", items: [{}] }] },
     { ...fixtures.structured as object, sections: [{ type: "text", markdown: { nested: { again: true } } }] },
-    { ...fixtures.markdown as object, markdown: "x".repeat(20_001) },
+    { ...fixtures.markdown as object, content: "x".repeat(20_001) },
   ];
   for (const payload of malformed) {
     assert.equal(parseAskLedgerlyResponse(payload), null);
@@ -80,13 +80,13 @@ test("rejects malformed, unknown, version-mismatched, and nested payloads safely
 test("fuzzed JSON shapes never crash, stringify objects, or create blank bubbles", () => {
   const values: unknown[] = [
     undefined, true, false, 0, 1, "", "text", [], [null], [{ a: 1 }],
-    { response_type: "markdown" }, { schema_version: 1 }, { sections: [[], {}] },
+    { type: "markdown" }, { schema_version: 1 }, { sections: [[], {}] },
   ];
   for (let index = 0; index < 150; index += 1) {
     values.push({
       schema_version: index % 3,
-      response_type: index % 2 ? "structured" : "other",
-      markdown: index % 4 ? null : { index },
+      type: index % 2 ? "structured" : "other",
+      content: index % 4 ? null : { index },
       sections: Array.from({ length: index % 5 }, (_, item) => ({ type: `fuzz-${item}`, value: { index } })),
     });
   }
@@ -118,4 +118,38 @@ test("empty structured sections render a readable nonblank state", () => {
     <AskLedgerlyResponseRenderer response={value} />,
   );
   assert.match(html, /No analysis details were returned/);
+});
+
+test("renders policy notices after allowed analytical sections", () => {
+  const value = {
+    ...(fixtures.structured as object),
+    type: "policy_notice",
+    content: "Ledgerly cannot guarantee future outcomes.",
+  };
+  assert.ok(parseAskLedgerlyResponse(value));
+  const html = renderToStaticMarkup(
+    <AskLedgerlyResponseRenderer response={value} />,
+  );
+  assert.match(html, /Monthly ranking/);
+  assert.match(html, /Scope notice/);
+  assert.match(html, /cannot guarantee future outcomes/);
+  assert.doesNotMatch(html, /\[object Object\]/);
+});
+
+test("renders validated errors and rejects null content safely", () => {
+  const error = {
+    schema_version: 1,
+    type: "error",
+    content: "Analysis unavailable. Reference: safe-id",
+    sections: [],
+    correlation_id: "safe-error-id",
+  };
+  const invalid = { ...error, content: null };
+  assert.ok(parseAskLedgerlyResponse(error));
+  assert.equal(parseAskLedgerlyResponse(invalid), null);
+  const html = renderToStaticMarkup(
+    <AskLedgerlyResponseRenderer response={error} />,
+  );
+  assert.match(html, /Analysis unavailable/);
+  assert.doesNotMatch(html, /\[object Object\]/);
 });

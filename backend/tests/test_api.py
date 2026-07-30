@@ -121,7 +121,10 @@ def test_register_and_upload_csv(client):
         json={"question": "What was revenue?"},
     )
     assert chat.status_code == 200
-    assert chat.json()["sources"] == ["june.csv"]
+    assert chat.json()["schema_version"] == 1
+    assert chat.json()["type"] == "markdown"
+    assert "55,842.00" in chat.json()["content"]
+    assert chat.json()["correlation_id"]
 
     report = client.get("/api/v1/reports/latest.pdf", headers=headers)
     assert report.status_code == 200

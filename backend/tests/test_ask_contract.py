@@ -3,7 +3,7 @@ import random
 from pathlib import Path
 
 from app.ai.contract import SAFE_FAILURE, serialize_ask_response
-from app.ai.service import DISCLAIMER
+from app.ai.policy import route_policy
 from app.schemas import ChatResponse
 
 REPOSITORY = Path(__file__).parents[2]
@@ -13,33 +13,40 @@ FIXTURES = json.loads(
     )
 )
 CSV_FIXTURE = Path(__file__).parent / "fixtures" / "sample_business_data.csv"
-LONG_REGRESSION_PROMPT = (
+PROMPT_A = "Summarize my total revenue, expenses, profit, and net margin."
+PROMPT_B = (
+    "Analyze each monthly row in my uploaded CSV. Identify the five best and "
+    "five worst months using profit, net margin, and revenue growth. Include "
+    "the exact month and values in a table."
+)
+PROMPT_C = (
     "Audit every monthly row, identify the best and worst months in tables, "
     "explain the ranking method, model a +10% revenue scenario, forecast the "
     "next period, list risks, and provide an action plan based only on my "
     "uploaded data."
 )
+PROMPT_D = (
+    "Act as my CFO: review performance and cash, rank risks, discuss pricing "
+    "and hiring implications supported by the upload, and recommend a "
+    "30/60/90-day operational action plan."
+)
+PROMPT_E = (
+    "Guarantee next quarter's revenue outcome and tell me which stock I should "
+    "buy, while still showing the historical forecast supported by my data."
+)
 VARIED_PROMPTS = [
-    "Summarize total revenue, expenses, profit, and margin.",
-    "Identify the five best and five worst monthly rows.",
+    PROMPT_A,
+    PROMPT_B,
+    "Reconcile all monthly rows chronologically.",
     "Explain the revenue trend over time.",
     "Is there seasonality in the uploaded history?",
     "Compare strongest and weakest net margins.",
     "Summarize ending cash balances over time.",
-    "Flag observed loss and revenue-decline risks.",
+    "Rank observed loss and revenue-decline risks.",
     "Forecast the next period from observed growth.",
     "What if revenue changes by +5% and expenses stay constant?",
-    "Explain the latest uploaded business data.",
+    PROMPT_D,
 ]
-
-
-def _common() -> dict:
-    return {
-        "correlation_id": "contract-test",
-        "confidence": "data-grounded",
-        "sources": ["sample.csv"],
-        "disclaimer": DISCLAIMER,
-    }
 
 
 def _register_and_upload(client) -> dict[str, str]:
@@ -67,6 +74,16 @@ def _register_and_upload(client) -> dict[str, str]:
     return headers
 
 
+def _ask(client, headers: dict[str, str], prompt: str) -> dict:
+    response = client.post(
+        "/api/v1/chat",
+        headers=headers,
+        json={"question": prompt},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
 def test_shared_contract_fixtures_validate_every_section_type():
     markdown = ChatResponse.model_validate(FIXTURES["markdown"])
     structured = ChatResponse.model_validate(FIXTURES["structured"])
@@ -90,35 +107,42 @@ def test_unknown_deep_oversized_and_nested_values_fail_to_safe_contract(caplog):
     inputs = [
         None,
         {"unexpected": "shape"},
-        {"kind": "structured_analysis", "title": {"object": True}},
-        {"response_type": "structured", "sections": [{"type": "unknown"}]},
-        {"response_type": "markdown", "markdown": {"nested": True}},
-        {"response_type": "markdown", "markdown": "x" * 100_001},
-        {"response_type": "structured", "sections": [{"type": "table", "columns": [{"label": "A"}], "rows": [[{"nested": True}]]}]},
+        {"type": "structured", "content": None, "sections": [{"type": "unknown"}]},
+        {"type": "markdown", "content": {"nested": True}, "sections": []},
+        {"type": "markdown", "content": "x" * 100_001, "sections": []},
+        {
+            "type": "structured",
+            "content": None,
+            "sections": [{
+                "type": "table",
+                "columns": [{"label": "A", "align": "left"}],
+                "rows": [[{"nested": True}]],
+            }],
+        },
         circular,
     ]
     for index, raw in enumerate(inputs):
         correlation_id = f"contract-failure-{index}"
         response = serialize_ask_response(
             raw,
-            **(_common() | {"correlation_id": correlation_id}),
+            correlation_id=correlation_id,
         )
         assert response.schema_version == 1
-        assert response.response_type == "structured"
-        assert response.sections[0].type == "notice"
-        assert correlation_id in response.sections[0].message
-        assert SAFE_FAILURE.split("{", 1)[0] in response.sections[0].message
+        assert response.type == "error"
+        assert response.sections == []
+        assert correlation_id in response.content
+        assert SAFE_FAILURE.split("{", 1)[0] in response.content
     assert "ask_response_contract_failure" in caplog.text
     assert "100001" not in caplog.text
 
 
-def test_fuzzed_backend_shapes_always_return_a_valid_contract():
+def test_fuzzed_backend_shapes_always_return_a_valid_readable_contract():
     generator = random.Random(20260731)
     atoms: list[object] = [None, True, False, 0, 1.5, "", "text"]
     candidates: list[object] = atoms.copy()
-    for index in range(250):
+    for index in range(300):
         value: object = generator.choice(atoms)
-        for _ in range(generator.randrange(0, 5)):
+        for _ in range(generator.randrange(0, 6)):
             value = (
                 [value, {"index": index}]
                 if generator.choice([True, False])
@@ -128,42 +152,99 @@ def test_fuzzed_backend_shapes_always_return_a_valid_contract():
     for index, raw in enumerate(candidates):
         response = serialize_ask_response(
             raw,
-            **(_common() | {"correlation_id": f"fuzz-{index:04d}"}),
+            correlation_id=f"fuzz-{index:04d}",
         )
         validated = ChatResponse.model_validate_json(response.model_dump_json())
         assert validated.schema_version == 1
-        assert validated.markdown or validated.sections
+        assert validated.content or validated.sections
 
 
-def test_ten_varied_prompts_keep_one_versioned_api_shape(client):
-    headers = _register_and_upload(client)
-    responses = [
-        client.post("/api/v1/chat", headers=headers, json={"question": prompt})
-        for prompt in VARIED_PROMPTS
-    ]
-    assert all(response.status_code == 200 for response in responses)
-    payloads = [response.json() for response in responses]
-    assert all(ChatResponse.model_validate(payload) for payload in payloads)
-    assert {payload["schema_version"] for payload in payloads} == {1}
-    assert {payload["response_type"] for payload in payloads} >= {
-        "markdown",
-        "structured",
-    }
-    assert len({json.dumps(payload["markdown"] or payload["sections"], sort_keys=True) for payload in payloads}) >= 8
-
-
-def test_long_audit_scenario_forecast_regression_has_explicit_sections(client):
-    headers = _register_and_upload(client)
-    response = client.post(
-        "/api/v1/chat",
-        headers=headers,
-        json={"question": LONG_REGRESSION_PROMPT},
+def test_policy_router_allows_business_analysis_keywords():
+    decision = route_policy(
+        "As CFO, recommend a pricing, hiring, risk, forecast, scenario, and "
+        "30/60/90 action-plan review."
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["schema_version"] == 1
-    assert payload["response_type"] == "structured"
-    section_types = {section["type"] for section in payload["sections"]}
-    assert {"text", "table", "scenarios", "forecast", "risks", "actions"} <= section_types
-    assert any(section.get("heading") == "5 best months" for section in payload["sections"])
-    assert any(section.get("heading") == "5 worst months" for section in payload["sections"])
+    assert decision.notice is None
+    assert decision.requires_forecast is False
+
+
+def test_prompts_a_to_d_answer_fully_and_e_is_partially_limited(client):
+    headers = _register_and_upload(client)
+    aggregate = _ask(client, headers, PROMPT_A)
+    ranking = _ask(client, headers, PROMPT_B)
+    long_review = _ask(client, headers, PROMPT_C)
+    cfo_review = _ask(client, headers, PROMPT_D)
+    limited = _ask(client, headers, PROMPT_E)
+
+    assert aggregate["type"] == "markdown"
+    assert all(
+        value in aggregate["content"]
+        for value in ("$5,453,000.00", "$3,919,000.00", "$1,534,000.00", "28.13%")
+    )
+
+    assert ranking["type"] == "structured"
+    ranking_tables = [
+        section for section in ranking["sections"] if section["type"] == "table"
+    ]
+    assert ranking_tables[0]["rows"][0][1:] == [
+        "December 2025",
+        "$240,000.00",
+        "$158,000.00",
+        "$82,000.00",
+        "34.17%",
+        "11.63%",
+    ]
+    assert ranking_tables[1]["rows"][0][1] == "March 2023"
+
+    long_types = {section["type"] for section in long_review["sections"]}
+    assert {"text", "table", "scenarios", "forecast", "risks", "actions"} <= long_types
+
+    cfo_types = {section["type"] for section in cfo_review["sections"]}
+    assert {"metrics", "table", "scenarios", "forecast", "risks", "actions", "notice"} <= cfo_types
+    assert "refus" not in json.dumps(cfo_review).lower()
+    assert any("30/60/90" in (section.get("heading") or "") for section in cfo_review["sections"])
+
+    assert limited["type"] == "policy_notice"
+    assert "cannot guarantee" in limited["content"]
+    assert "investment" in limited["content"]
+    assert any(section["type"] == "forecast" for section in limited["sections"])
+
+    for payload in (aggregate, ranking, long_review, cfo_review, limited):
+        assert payload["schema_version"] == 1
+        assert payload["correlation_id"]
+        assert ChatResponse.model_validate(payload)
+
+
+def test_varied_prompts_keep_one_shape_and_materially_different_answers(client):
+    headers = _register_and_upload(client)
+    payloads = [_ask(client, headers, prompt) for prompt in VARIED_PROMPTS]
+    assert {payload["schema_version"] for payload in payloads} == {1}
+    assert {payload["type"] for payload in payloads} >= {"markdown", "structured"}
+    rendered = {
+        json.dumps(payload["content"] or payload["sections"], sort_keys=True)
+        for payload in payloads
+    }
+    assert len(rendered) >= 10
+
+
+def test_monthly_reconciliation_uses_all_persisted_rows_and_ending_cash(client):
+    headers = _register_and_upload(client)
+    payload = _ask(
+        client,
+        headers,
+        "Reconcile all monthly rows chronologically, including ending cash.",
+    )
+    table = next(
+        section for section in payload["sections"] if section["type"] == "table"
+    )
+    assert len(table["rows"]) == 36
+    assert table["rows"][0] == [
+        "January 2023",
+        "$100,000.00",
+        "$78,000.00",
+        "$22,000.00",
+        "22.00%",
+        "N/A",
+        "$50,000.00",
+    ]
+    assert table["rows"][-1][-1] == "$245,000.00"

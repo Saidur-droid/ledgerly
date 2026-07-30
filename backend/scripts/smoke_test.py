@@ -194,37 +194,42 @@ def run_smoke_test(api_url: str, check_database: bool) -> None:
             200,
         )
         require(
-            aggregate_chat["sources"] == [FIXTURE_PATH.name],
-            "AI chat did not use the uploaded file as its source.",
+            aggregate_chat["schema_version"] == 1
+            and aggregate_chat["correlation_id"],
+            "AI chat did not return the versioned response contract.",
         )
         require(
-            aggregate_chat["answer"] != period_chat["answer"],
+            aggregate_chat["content"] != period_chat["sections"],
             "Different questions returned the same answer.",
         )
         require(
-            "$5,453,000.00" in aggregate_chat["answer"],
+            "$5,453,000.00" in aggregate_chat["content"],
             "Aggregate chat answer did not use persisted totals.",
         )
-        period_answer = period_chat["answer"]
         require(
-            isinstance(period_answer, dict)
-            and period_answer.get("kind") == "structured_analysis",
+            period_chat["type"] == "structured",
             "Period chat answer was not serialized as structured analysis.",
         )
-        sections = period_answer.get("sections", [])
+        sections = period_chat["sections"]
+        tables = [
+            section for section in sections if section.get("type") == "table"
+        ]
         require(
-            [section.get("heading") for section in sections]
+            [section.get("heading") for section in tables]
             == ["5 best months", "5 worst months"]
-            and sections[0]["table"]["rows"][0]["month"] == "December 2025"
-            and sections[1]["table"]["rows"][0]["month"] == "March 2023",
+            and tables[0]["rows"][0][1] == "December 2025"
+            and tables[1]["rows"][0][1] == "March 2023",
             "Period chat answer did not analyze persisted monthly rows.",
         )
-        scoring = period_answer.get("scoring", {})
+        scoring = next(
+            section["markdown"]
+            for section in sections
+            if section.get("heading") == "Ranking method"
+        )
         require(
-            scoring.get("formula") == EXPECTED_RANKING_FORMULA
-            and "min–max normalized" in scoring.get("normalization", "")
-            and "neutral normalized growth score of 0.50"
-            in scoring.get("first_period", ""),
+            EXPECTED_RANKING_FORMULA in scoring
+            and "min–max normalized" in scoring
+            and "neutral normalized growth score of 0.50" in scoring,
             "Period chat answer did not explain its ranking methodology.",
         )
 
@@ -264,9 +269,9 @@ def run_smoke_test(api_url: str, check_database: bool) -> None:
         verify_database(email)
 
     print("PROMPT A RESPONSE:")
-    print(aggregate_chat["answer"])
+    print(aggregate_chat["content"])
     print("\nPROMPT B RESPONSE:")
-    print(json.dumps(period_chat["answer"], indent=2))
+    print(json.dumps(period_chat, indent=2))
     print("\nPASS: CSV -> persistence -> metrics -> Pulse -> dashboard -> question-aware chat -> PDF")
 
 
