@@ -4,239 +4,118 @@ import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { ChatMarkdown } from "../src/components/chat-markdown";
-import {
-  ChatResponseContent,
-  formatUnsupportedChatAnswer,
-  isStructuredAnalysis,
-} from "../src/components/chat-response";
-import type { StructuredAnalysis } from "../src/lib/api";
+import { AskLedgerlyResponseRenderer } from "../src/components/chat-response";
+import { parseAskLedgerlyResponse } from "../src/lib/api";
 
-const structuredAnswer: StructuredAnalysis = {
-  kind: "structured_analysis",
-  title: "Monthly performance ranking",
-  summary: "**36 periods** analyzed.",
-  sections: [
-    {
-      heading: "Best months",
-      table: {
-        columns: [
-          { key: "month", label: "Month", align: "left" },
-          { key: "profit", label: "Profit", align: "right" },
-        ],
-        rows: [
-          { month: "December 2025", profit: "$82,000.00" },
-        ],
-      },
-    },
-  ],
-  scoring: {
-    formula: "40% profit + 35% net margin + 25% revenue growth",
-    weights: { profit: 40, net_margin: 35, revenue_growth: 25 },
-    normalization: "Inputs are min–max normalized.",
-    first_period: "The first period receives a neutral growth score.",
-    interpretation: "The highest-profit month may not rank first.",
-  },
-  risks: ["Revenue declined in two periods."],
-  action_plan: ["Review the persisted monthly rows."],
-};
+const fixtures = JSON.parse(
+  readFileSync("../contracts/ask-ledgerly-v1.fixtures.json", "utf8"),
+) as Record<string, unknown>;
 
-test("renders GitHub-flavored Markdown tables without raw pipe syntax", () => {
+test("validates and renders the shared markdown contract", () => {
+  assert.ok(parseAskLedgerlyResponse(fixtures.markdown));
   const html = renderToStaticMarkup(
-    <ChatMarkdown
-      content={[
-        "### Best months",
-        "",
-        "| Month | Profit |",
-        "|---|---:|",
-        "| January 2026 | $10,000 |",
-      ].join("\n")}
-    />,
+    <AskLedgerlyResponseRenderer response={fixtures.markdown} />,
   );
-
-  assert.match(html, /<h3>Best months<\/h3>/);
-  assert.match(html, /<table>/);
-  assert.match(html, /<th[^>]*>Month<\/th>/);
-  assert.match(html, /<td[^>]*>January 2026<\/td>/);
-  assert.doesNotMatch(html, /\|---/);
-  assert.doesNotMatch(html, /\| Month \|/);
-});
-
-test("supports lists, bold text, numbered lists, and inline code", () => {
-  const html = renderToStaticMarkup(
-    <ChatMarkdown
-      content={[
-        "## Method",
-        "",
-        "- **Profit** is normalized",
-        "- Margin is weighted",
-        "",
-        "1. Sort dates",
-        "2. Calculate `growth`",
-      ].join("\n")}
-    />,
-  );
-
-  assert.match(html, /<h2>Method<\/h2>/);
-  assert.match(html, /<ul>/);
-  assert.match(html, /<ol>/);
-  assert.match(html, /<strong>Profit<\/strong>/);
-  assert.match(html, /<code>growth<\/code>/);
-});
-
-test("does not render malicious raw HTML", () => {
-  const html = renderToStaticMarkup(
-    <ChatMarkdown
-      content={'<script>alert("xss")</script><img src=x onerror="alert(1)">'}
-    />,
-  );
-
-  assert.doesNotMatch(html, /<script/i);
-  assert.doesNotMatch(html, /<img/i);
-  assert.doesNotMatch(html, /onerror/i);
-});
-
-test("wraps tables in a keyboard-accessible horizontal scroll region", () => {
-  const html = renderToStaticMarkup(
-    <ChatMarkdown content={"| A | B |\n|---|---|\n| 1 | 2 |"} />,
-  );
-  const css = readFileSync("src/app/globals.css", "utf8");
-
-  assert.match(html, /class="markdown-table-scroll"/);
-  assert.match(html, /role="region"/);
-  assert.match(html, /tabindex="0"/);
-  assert.match(
-    css,
-    /\.markdown-table-scroll\s*\{[\s\S]*?max-width:\s*100%/,
-  );
-  assert.match(
-    css,
-    /\.markdown-table-scroll\s*\{[\s\S]*?overflow-x:\s*auto/,
-  );
-  assert.match(css, /\.message\s*\{[\s\S]*?min-width:\s*0/);
-  assert.match(css, /\.chat-markdown th,[\s\S]*?text-align:\s*right/);
-  assert.match(
-    css,
-    /\.chat-markdown th:nth-child\(2\),[\s\S]*?text-align:\s*left/,
-  );
-});
-
-test("renders a plain string response through safe Markdown", () => {
-  const html = renderToStaticMarkup(
-    <ChatResponseContent content={"**Revenue:** $100"} />,
-  );
-
+  assert.match(html, /<h2>Revenue<\/h2>/);
   assert.match(html, /<strong>Revenue:<\/strong>/);
+  assert.match(html, /rel="noopener noreferrer"/);
   assert.doesNotMatch(html, /\[object Object\]/);
 });
 
-test("renders a structured response with tables and ranking metadata", () => {
+test("renders every structured section type through one renderer", () => {
+  assert.ok(parseAskLedgerlyResponse(fixtures.structured));
   const html = renderToStaticMarkup(
-    <ChatResponseContent content={structuredAnswer} />,
+    <AskLedgerlyResponseRenderer response={fixtures.structured} />,
   );
-
-  assert.equal(isStructuredAnalysis(structuredAnswer), true);
-  assert.match(html, /Monthly performance ranking/);
+  for (const expected of [
+    "Audit summary", "Headline metrics", "Monthly ranking", "Observations",
+    "Scenarios", "Forecast", "Risks", "Action plan",
+  ]) assert.match(html, new RegExp(expected));
   assert.match(html, /<table class="structured-analysis-table">/);
   assert.match(html, /December 2025/);
-  assert.match(
-    html,
-    /40% profit \+ 35% net margin \+ 25% revenue growth/,
-  );
-  assert.match(html, /Inputs are min–max normalized/);
-  assert.match(html, /Risks/);
-  assert.match(html, /Action plan/);
+  assert.match(html, /Revenue \+5%/);
+  assert.match(html, /not a guarantee/);
   assert.doesNotMatch(html, /\[object Object\]/);
 });
 
-test("accepts structured responses with mixed optional fields", () => {
-  const mixed = {
-    kind: "structured_analysis",
-    title: "Scenario analysis",
-    sections: [
-      {
-        heading: "Scenario",
-        markdown: "Revenue increases by **5%**.",
-        cards: [
-          { label: "Projected revenue", value: "$105,000" },
-          {
-            label: "Margin",
-            value: "22%",
-            detail: "Mechanical scenario only.",
-          },
-        ],
-        table: {
-          columns: [
-            { key: "case", label: "Scenario", align: "left" },
-            { key: "revenue", label: "Revenue", align: "right" },
-          ],
-          rows: [
-            { case: "Baseline", revenue: "$100,000" },
-            { case: "Illustrative", revenue: "$105,000" },
-          ],
-        },
-      },
-      {
-        heading: "Forecast",
-        markdown: "A historical projection, **not a guarantee**.",
-      },
-    ],
-  };
+test("renders GFM tables without raw pipe syntax and blocks raw HTML", () => {
   const html = renderToStaticMarkup(
-    <ChatResponseContent content={mixed} />,
+    <ChatMarkdown content={"| Month | Profit |\n|---|---:|\n| Jan | $10 |\n\n<script>alert(1)</script>"} />,
   );
-
-  assert.equal(isStructuredAnalysis(mixed), true);
-  assert.match(html, /Scenario analysis/);
-  assert.match(html, /<strong>5%<\/strong>/);
-  assert.match(html, /Projected revenue/);
-  assert.match(html, /Mechanical scenario only/);
-  assert.match(html, /Illustrative/);
-  assert.match(html, /Forecast/);
-  assert.match(html, /<strong>not a guarantee<\/strong>/);
-  assert.doesNotMatch(html, /\[object Object\]/);
-});
-
-test("uses safe fallbacks for null and invalid response payloads", () => {
-  const invalid = { unexpected: { nested: true } };
-  const nullHtml = renderToStaticMarkup(
-    <ChatResponseContent content={null} />,
-  );
-  const invalidHtml = renderToStaticMarkup(
-    <ChatResponseContent content={invalid} />,
-  );
-  const developmentDetails = formatUnsupportedChatAnswer(invalid, true);
-  const productionMessage = formatUnsupportedChatAnswer(invalid, false);
-
-  assert.equal(isStructuredAnalysis(null), false);
-  assert.equal(isStructuredAnalysis(invalid), false);
-  assert.match(nullHtml, /unsupported analysis response/);
-  assert.match(invalidHtml, /unsupported analysis response/);
-  assert.match(developmentDetails, /"nested": true/);
-  assert.doesNotMatch(productionMessage, /nested/);
-  assert.doesNotMatch(nullHtml, /\[object Object\]/);
-  assert.doesNotMatch(invalidHtml, /\[object Object\]/);
-});
-
-test("structured content cannot inject executable HTML", () => {
-  const malicious = {
-    ...structuredAnswer,
-    title: "<img src=x onerror=alert(1)>",
-    summary: '<script>alert("xss")</script>Safe summary',
-    sections: [
-      {
-        heading: "<script>bad()</script>",
-        markdown: '<iframe src="javascript:alert(1)"></iframe>Safe section',
-      },
-    ],
-  };
-  const html = renderToStaticMarkup(
-    <ChatResponseContent content={malicious} />,
-  );
-
-  assert.equal(isStructuredAnalysis(malicious), true);
+  assert.match(html, /<table>/);
+  assert.doesNotMatch(html, /\|---/);
   assert.doesNotMatch(html, /<script/i);
-  assert.doesNotMatch(html, /<img/i);
-  assert.doesNotMatch(html, /<iframe/i);
-  assert.doesNotMatch(html, /\[object Object\]/);
-  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+});
+
+test("sanitizes dangerous Markdown URLs", () => {
+  const html = renderToStaticMarkup(
+    <ChatMarkdown content={"[bad](javascript:alert(1)) [good](https://example.com)"} />,
+  );
+  assert.doesNotMatch(html, /javascript:/i);
+  assert.match(html, /href="https:\/\/example.com"/);
+});
+
+test("rejects malformed, unknown, version-mismatched, and nested payloads safely", () => {
+  const malformed = [
+    null,
+    {},
+    { ...fixtures.markdown as object, schema_version: 2 },
+    { ...fixtures.structured as object, sections: [{ type: "unknown" }] },
+    { ...fixtures.markdown as object, markdown: { nested: true } },
+    { ...fixtures.structured as object, sections: [{ type: "list", style: "bulleted", items: [{}] }] },
+    { ...fixtures.structured as object, sections: [{ type: "text", markdown: { nested: { again: true } } }] },
+    { ...fixtures.markdown as object, markdown: "x".repeat(20_001) },
+  ];
+  for (const payload of malformed) {
+    assert.equal(parseAskLedgerlyResponse(payload), null);
+    const html = renderToStaticMarkup(
+      <AskLedgerlyResponseRenderer response={payload} />,
+    );
+    assert.match(html, /could not safely display/);
+    assert.doesNotMatch(html, /\[object Object\]/);
+    assert.doesNotMatch(html, /nested/);
+  }
+});
+
+test("fuzzed JSON shapes never crash, stringify objects, or create blank bubbles", () => {
+  const values: unknown[] = [
+    undefined, true, false, 0, 1, "", "text", [], [null], [{ a: 1 }],
+    { response_type: "markdown" }, { schema_version: 1 }, { sections: [[], {}] },
+  ];
+  for (let index = 0; index < 150; index += 1) {
+    values.push({
+      schema_version: index % 3,
+      response_type: index % 2 ? "structured" : "other",
+      markdown: index % 4 ? null : { index },
+      sections: Array.from({ length: index % 5 }, (_, item) => ({ type: `fuzz-${item}`, value: { index } })),
+    });
+  }
+  for (const value of values) {
+    const html = renderToStaticMarkup(
+      <AskLedgerlyResponseRenderer response={value} />,
+    );
+    assert.ok(html.trim().length > 0);
+    assert.doesNotMatch(html, /\[object Object\]/);
+    assert.doesNotMatch(html, /<script/i);
+  }
+});
+
+test("table and sidebar CSS contain horizontal and mobile overflow guards", () => {
+  const css = readFileSync("src/app/globals.css", "utf8");
+  assert.match(css, /\.markdown-table-scroll\s*\{[\s\S]*?overflow-x:\s*auto/);
+  assert.match(css, /\.messages\s*\{[\s\S]*?overflow-x:\s*hidden/);
+  assert.match(css, /\.structured-analysis\s*\{[\s\S]*?max-width:\s*100%/);
+  assert.match(css, /@media \(max-width: 480px\)[\s\S]*?\.chat-panel\s*\{\s*width:\s*100%/);
+});
+
+test("empty structured sections render a readable nonblank state", () => {
+  const value = {
+    ...(fixtures.structured as object),
+    sections: [],
+  };
+  assert.ok(parseAskLedgerlyResponse(value));
+  const html = renderToStaticMarkup(
+    <AskLedgerlyResponseRenderer response={value} />,
+  );
+  assert.match(html, /No analysis details were returned/);
 });

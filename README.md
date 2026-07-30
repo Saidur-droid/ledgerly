@@ -45,6 +45,7 @@ uploads, normalized business records, metrics, and Pulse history.
 - Explainable Business Pulse score and factors
 - Historical upload comparison and persistent business memory
 - Question-aware AI chat over persisted period rows, with deterministic analysis
+  and a strict versioned response contract
 - Authenticated, user-isolated dashboard APIs
 - PDF report export
 - Responsive Next.js interface
@@ -96,16 +97,17 @@ chronological period receives a neutral growth score of `0.50` because it has
 no preceding period. The API includes this methodology in the Markdown answer,
 and the frontend renders it without maintaining a second copy of the weights.
 
-Ask Ledgerly responses use an explicit union:
+Ask Ledgerly responses use one strict versioned envelope. Schema version `1`
+discriminates `markdown` responses from `structured` responses. Structured
+content is limited to explicit `text`, `metrics`, `table`, `list`, `scenarios`,
+`forecast`, `risks`, `actions`, and `notice` sections; table cells can contain
+only JSON primitives.
 
-- a Markdown string for narrative explanations; or
-- a `structured_analysis` object containing a title, optional summary,
-  sections, tables, cards, ranking metadata, risks, and action-plan items.
-
-The frontend validates this shape at runtime. Unsupported payloads receive a
-safe user-facing production error instead of being coerced to
-`[object Object]`; development builds render escaped, formatted JSON for
-diagnosis.
+The backend validates and size-checks every envelope through one adapter before
+returning it. The frontend validates the same contract at the network boundary
+and renders every variant through one exhaustive renderer. Unsupported payloads
+receive a correlation-safe user-facing error instead of raw JSON or implicit
+object coercion.
 
 A column named `cash`, `cash balance`, or another balance-style alias is treated
 as a period-ending balance. The latest dated balance is the headline cash KPI;

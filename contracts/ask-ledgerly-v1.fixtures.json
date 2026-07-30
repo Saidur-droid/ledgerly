@@ -1,0 +1,94 @@
+{
+  "markdown": {
+    "schema_version": 1,
+    "response_type": "markdown",
+    "correlation_id": "fixture-markdown",
+    "markdown": "## Revenue\n\n**Revenue:** $100,000\n\n[Safe link](https://example.com)",
+    "sections": [],
+    "confidence": "data-grounded",
+    "sources": ["sample.csv"],
+    "disclaimer": "Ledgerly explains uploaded business data only."
+  },
+  "structured": {
+    "schema_version": 1,
+    "response_type": "structured",
+    "correlation_id": "fixture-structured",
+    "markdown": null,
+    "sections": [
+      {
+        "type": "text",
+        "heading": "Audit summary",
+        "markdown": "**36 periods** were analyzed."
+      },
+      {
+        "type": "metrics",
+        "heading": "Headline metrics",
+        "items": [
+          {"label": "Revenue", "value": "$5,453,000.00"},
+          {"label": "Net margin", "value": "28.13%", "detail": "Aggregate margin"}
+        ]
+      },
+      {
+        "type": "table",
+        "heading": "Monthly ranking",
+        "columns": [
+          {"label": "Month", "align": "left"},
+          {"label": "Profit", "align": "right"}
+        ],
+        "rows": [
+          ["December 2025", "$82,000.00"],
+          ["March 2023", "$19,000.00"]
+        ]
+      },
+      {
+        "type": "list",
+        "heading": "Observations",
+        "style": "bulleted",
+        "items": ["Revenue grew.", "Cash is an ending balance."]
+      },
+      {
+        "type": "scenarios",
+        "heading": "Scenarios",
+        "scenarios": [
+          {
+            "name": "Revenue +5%",
+            "assumptions": ["Expenses remain constant."],
+            "outcomes": [{"label": "Revenue", "value": "$5,725,650.00"}]
+          }
+        ]
+      },
+      {
+        "type": "forecast",
+        "heading": "Forecast",
+        "summary": "A mechanical historical projection, **not a guarantee**.",
+        "horizon": "One period",
+        "methodology": "Uses recent observed growth.",
+        "metrics": [{"label": "Projected revenue", "value": "$250,000.00"}],
+        "caveats": ["Uploaded history may not repeat."]
+      },
+      {
+        "type": "risks",
+        "heading": "Risks",
+        "items": [
+          {"label": "Revenue decline", "detail": "Two periods declined.", "severity": "medium"}
+        ]
+      },
+      {
+        "type": "actions",
+        "heading": "Action plan",
+        "items": [
+          {"label": "Review source rows", "detail": null, "priority": "unprioritized"}
+        ]
+      },
+      {
+        "type": "notice",
+        "heading": null,
+        "tone": "info",
+        "message": "This analysis explains uploaded data only."
+      }
+    ],
+    "confidence": "data-grounded",
+    "sources": ["sample_business_data.csv"],
+    "disclaimer": "Ledgerly explains uploaded business data only."
+  }
+}

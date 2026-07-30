@@ -118,46 +118,41 @@ def test_chat_questions_use_persisted_rows_and_produce_distinct_answers(client):
 
     assert aggregate.status_code == 200
     assert period_analysis.status_code == 200
-    aggregate_answer = aggregate.json()["answer"]
-    period_answer = period_analysis.json()["answer"]
-    assert aggregate_answer != period_answer
+    aggregate_answer = aggregate.json()["markdown"]
+    period_answer = period_analysis.json()
+    assert aggregate.json() != period_answer
     assert "$5,453,000.00" in aggregate_answer
     assert "$3,919,000.00" in aggregate_answer
     assert "$1,534,000.00" in aggregate_answer
     assert "28.13%" in aggregate_answer
-    assert period_answer["kind"] == "structured_analysis"
-    assert period_answer["title"] == "Monthly performance ranking"
-    assert [section["heading"] for section in period_answer["sections"]] == [
+    assert aggregate.json()["response_type"] == "markdown"
+    assert period_answer["response_type"] == "structured"
+    assert period_answer["schema_version"] == 1
+    table_sections = [
+        section for section in period_answer["sections"] if section["type"] == "table"
+    ]
+    assert [section["heading"] for section in table_sections] == [
         "5 best months",
         "5 worst months",
     ]
-    assert period_answer["sections"][0]["table"]["rows"][0] == {
-        "rank": 1,
-        "month": "December 2025",
-        "revenue": "$240,000.00",
-        "expenses": "$158,000.00",
-        "profit": "$82,000.00",
-        "net_margin": "34.17%",
-        "revenue_growth": "11.63%",
-    }
-    assert period_answer["sections"][1]["table"]["rows"][0] == {
-        "rank": 1,
-        "month": "March 2023",
-        "revenue": "$98,000.00",
-        "expenses": "$79,000.00",
-        "profit": "$19,000.00",
-        "net_margin": "19.39%",
-        "revenue_growth": "-6.67%",
-    }
+    assert table_sections[0]["rows"][0] == [
+        1, "December 2025", "$240,000.00", "$158,000.00", "$82,000.00",
+        "34.17%", "11.63%",
+    ]
+    assert table_sections[1]["rows"][0] == [
+        1, "March 2023", "$98,000.00", "$79,000.00", "$19,000.00",
+        "19.39%", "-6.67%",
+    ]
     assert "previous upload" not in aggregate_answer.lower()
-    assert RANKING_FORMULA == period_answer["scoring"]["formula"]
-    assert "min–max normalized" in period_answer["scoring"]["normalization"]
-    assert "highest-profit month may not rank first" in (
-        period_answer["scoring"]["interpretation"]
+    ranking_method = next(
+        section["markdown"]
+        for section in period_answer["sections"]
+        if section["type"] == "text" and section.get("heading") == "Ranking method"
     )
-    assert "neutral normalized growth score of 0.50" in (
-        period_answer["scoring"]["first_period"]
-    )
+    assert RANKING_FORMULA in ranking_method
+    assert "min–max normalized" in ranking_method
+    assert "highest-profit month may not rank first" in ranking_method
+    assert "neutral normalized growth score of 0.50" in ranking_method
     assert aggregate.json()["confidence"] == "data-grounded"
     assert period_analysis.json()["confidence"] == "data-grounded"
 
@@ -173,7 +168,7 @@ def test_cash_answer_uses_latest_balance_instead_of_sum(client):
     )
 
     assert response.status_code == 200
-    answer = response.json()["answer"]
+    answer = response.json()["markdown"]
     assert "Latest period-ending cash was $245,000.00" in answer
     assert "Average balance was $118,472.22" in answer
     assert "monthly balances are not summed" in answer
@@ -206,7 +201,7 @@ def test_chat_response_is_derived_from_current_upload_values(client):
     )
 
     assert response.status_code == 200
-    answer = response.json()["answer"]
+    answer = response.json()["markdown"]
     assert "$7,770.00" in answer
     assert "$2,670.00" in answer
     assert "$5,100.00" in answer
@@ -317,8 +312,10 @@ def test_ranking_ties_are_stable_and_best_worst_do_not_overlap():
     assert len(worst) == 3
 
 
-def test_chat_response_schema_accepts_only_string_or_structured_answers():
+def test_chat_response_schema_accepts_only_versioned_contract():
     common = {
+        "schema_version": 1,
+        "correlation_id": "contract-test",
         "confidence": "data-grounded",
         "sources": ["sample.csv"],
         "disclaimer": "Explanation only.",
@@ -326,37 +323,35 @@ def test_chat_response_schema_accepts_only_string_or_structured_answers():
     plain = ChatResponse.model_validate(
         {
             **common,
-            "answer": "**Revenue:** $100",
+            "response_type": "markdown",
+            "markdown": "**Revenue:** $100",
+            "sections": [],
         }
     )
     structured = ChatResponse.model_validate(
         {
             **common,
-            "answer": {
-                "kind": "structured_analysis",
-                "title": "Scenario",
-                "sections": [
-                    {
-                        "heading": "Forecast",
-                        "markdown": "A historical projection.",
-                        "cards": [
-                            {"label": "Revenue", "value": "$100"},
-                        ],
-                    }
-                ],
-                "risks": ["Limited history."],
-                "action_plan": ["Review the source rows."],
-            },
+            "response_type": "structured",
+            "markdown": None,
+            "sections": [{
+                "type": "forecast",
+                "heading": "Forecast",
+                "summary": "A historical projection.",
+                "metrics": [{"label": "Revenue", "value": "$100"}],
+                "caveats": ["Limited history."],
+            }],
         }
     )
 
-    assert plain.answer == "**Revenue:** $100"
-    assert structured.answer.kind == "structured_analysis"
-    assert structured.answer.sections[0].heading == "Forecast"
+    assert plain.markdown == "**Revenue:** $100"
+    assert structured.response_type == "structured"
+    assert structured.sections[0].heading == "Forecast"
     with pytest.raises(ValidationError):
         ChatResponse.model_validate(
             {
                 **common,
-                "answer": {"unexpected": "shape"},
+                "response_type": "structured",
+                "markdown": None,
+                "sections": [{"type": "unexpected"}],
             }
         )
