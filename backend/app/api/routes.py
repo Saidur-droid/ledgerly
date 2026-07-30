@@ -1,5 +1,6 @@
 import hashlib
 import re
+from uuid import uuid4
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -9,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.service import DISCLAIMER, answer_business_question
+from app.ai.contract import serialize_ask_response
 from app.business_engine.parser import parse_business_file
 from app.business_engine.storage import (
     BusinessStore,
@@ -213,7 +215,13 @@ def chat(
         "data": upload.normalized_data,
     }
     answer, confidence = answer_business_question(payload.question, context)
-    return ChatResponse(answer=answer, confidence=confidence, sources=[upload.filename], disclaimer=DISCLAIMER)
+    return serialize_ask_response(
+        answer,
+        correlation_id=uuid4().hex,
+        confidence=confidence,
+        sources=[upload.filename],
+        disclaimer=DISCLAIMER,
+    )
 
 
 @router.get("/reports/latest.pdf")

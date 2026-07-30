@@ -490,6 +490,181 @@ def _scenario_answer(context: dict[str, Any], question: str) -> str:
     )
 
 
+def _comprehensive_answer(
+    context: dict[str, Any],
+    question: str,
+    periods: list[dict[str, Any]],
+) -> dict[str, Any]:
+    ranked = _rank_scores(periods)
+    best, worst = _ranking_groups(ranked)
+    columns = [
+        {"label": "Rank", "align": "right"},
+        {"label": "Month", "align": "left"},
+        {"label": "Revenue", "align": "right"},
+        {"label": "Expenses", "align": "right"},
+        {"label": "Profit", "align": "right"},
+        {"label": "Net margin", "align": "right"},
+        {"label": "Revenue growth", "align": "right"},
+    ]
+
+    def ranking_rows(items: list[dict[str, Any]]) -> list[list[Any]]:
+        return [
+            [
+                rank,
+                item["label"],
+                _money(item["revenue"]),
+                _money(item["expenses"]),
+                _money(item["profit"]),
+                _percent(item["net_margin"]),
+                _percent(item["revenue_growth"]),
+            ]
+            for rank, item in enumerate(items, 1)
+        ]
+
+    metrics = context.get("metrics", {})
+    revenue = _number(metrics.get("revenue"))
+    expenses = _number(metrics.get("expenses"))
+    change_match = re.search(r"([+-]?\d+(?:\.\d+)?)\s*%", question)
+    change = float(change_match.group(1)) if change_match else 10.0
+    scenario_revenue = revenue * (1 + change / 100) if revenue is not None else None
+    scenario_profit = (
+        scenario_revenue - expenses
+        if scenario_revenue is not None and expenses is not None
+        else None
+    )
+    scenario_margin = (
+        scenario_profit / scenario_revenue * 100
+        if scenario_profit is not None and scenario_revenue
+        else None
+    )
+    revenue_periods = [item for item in periods if item["revenue"] is not None]
+    recent_growth = [
+        item["revenue_growth"]
+        for item in revenue_periods[-7:]
+        if item["revenue_growth"] is not None
+    ]
+    average_growth = (
+        sum(recent_growth) / len(recent_growth) if recent_growth else None
+    )
+    projected = (
+        revenue_periods[-1]["revenue"] * (1 + average_growth / 100)
+        if revenue_periods and average_growth is not None
+        else None
+    )
+    losses = [item for item in periods if item["profit"] is not None and item["profit"] < 0]
+    declines = [
+        item
+        for item in periods
+        if item["revenue_growth"] is not None and item["revenue_growth"] < 0
+    ]
+    return {
+        "response_type": "structured",
+        "markdown": None,
+        "sections": [
+            {
+                "type": "text",
+                "heading": "Business data audit",
+                "markdown": (
+                    f"I analyzed **{len(periods)} persisted periods** from "
+                    f"{_range_description(periods)}."
+                ),
+            },
+            {
+                "type": "table",
+                "heading": f"{len(best)} best months",
+                "columns": [dict(column) for column in columns],
+                "rows": ranking_rows(best),
+            },
+            {
+                "type": "table",
+                "heading": f"{len(worst)} worst months",
+                "columns": [dict(column) for column in columns],
+                "rows": ranking_rows(worst),
+            },
+            {
+                "type": "text",
+                "heading": "Ranking method",
+                "markdown": (
+                    f"**Composite score:** `{RANKING_FORMULA}`\n\n"
+                    "Each input is min–max normalized before weighting. The "
+                    "first chronological period receives a neutral 0.50 growth "
+                    "score because no prior period exists."
+                ),
+            },
+            {
+                "type": "scenarios",
+                "heading": "Scenario analysis",
+                "scenarios": [{
+                    "name": f"Revenue {change:+.2f}%",
+                    "assumptions": ["Aggregate expenses remain unchanged."],
+                    "outcomes": [
+                        {"label": "Revenue", "value": _money(scenario_revenue)},
+                        {"label": "Profit", "value": _money(scenario_profit)},
+                        {"label": "Net margin", "value": _percent(scenario_margin)},
+                    ],
+                }],
+            },
+            {
+                "type": "forecast",
+                "heading": "Historical run-rate forecast",
+                "summary": (
+                    "A mechanical one-period projection based on recent "
+                    "observed revenue growth; it is not a guarantee."
+                ),
+                "horizon": "One period",
+                "methodology": (
+                    f"Average of {len(recent_growth)} recent observed growth rates."
+                ),
+                "metrics": [
+                    {"label": "Average growth", "value": _percent(average_growth)},
+                    {"label": "Projected revenue", "value": _money(projected)},
+                ],
+                "caveats": ["Uploaded historical patterns may not repeat."],
+            },
+            {
+                "type": "risks",
+                "heading": "Observed risks",
+                "items": [
+                    {
+                        "label": "Loss-making periods",
+                        "detail": f"{len(losses)} period(s) had negative profit.",
+                        "severity": "high" if losses else "low",
+                    },
+                    {
+                        "label": "Revenue declines",
+                        "detail": f"{len(declines)} period(s) had negative growth.",
+                        "severity": "medium" if declines else "low",
+                    },
+                ],
+            },
+            {
+                "type": "actions",
+                "heading": "Data review plan",
+                "items": [
+                    {
+                        "label": "Review flagged source rows",
+                        "detail": "Validate the periods highlighted in the ranking and risk sections.",
+                        "priority": "unprioritized",
+                    },
+                    {
+                        "label": "Compare the next upload",
+                        "detail": "Use Business Memory to compare observed changes.",
+                        "priority": "unprioritized",
+                    },
+                ],
+            },
+            {
+                "type": "notice",
+                "tone": "policy",
+                "message": (
+                    "Scenarios and forecasts explain uploaded data and stated "
+                    "assumptions only; they are not financial recommendations."
+                ),
+            },
+        ],
+    }
+
+
 def deterministic_answer(
     question: str,
     context: dict[str, Any],
@@ -498,6 +673,17 @@ def deterministic_answer(
     if not metrics:
         return "I could not identify enough structured metrics in the latest upload to answer that confidently."
     periods = _periods(context)
+    complex_intents = sum(
+        bool(pattern.search(question))
+        for pattern in (
+            PERIOD_ANALYSIS,
+            SCENARIO_ANALYSIS,
+            FORECAST_ANALYSIS,
+            RISK_ANALYSIS,
+        )
+    )
+    if complex_intents >= 3:
+        return _comprehensive_answer(context, question, periods)
     if PERIOD_ANALYSIS.search(question):
         return _best_worst_answer(periods)
     if SEASONALITY_ANALYSIS.search(question):

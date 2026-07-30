@@ -45,20 +45,22 @@ import {
   getSettings,
   hasSession,
   listUploads,
+  localMarkdownResponse,
+  type AskLedgerlyResponse,
   type Pulse,
   type User,
   updateProfile,
   uploadBusinessData,
 } from "@/lib/api";
 import { ChatMarkdown } from "@/components/chat-markdown";
-import { ChatResponseContent } from "@/components/chat-response";
+import { AskLedgerlyResponseRenderer } from "@/components/chat-response";
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set(["csv", "xlsx", "pdf", "json"]);
 const METRIC_COLORS = ["#7357ff", "#a99aff", "#d4cbff", "#eeebff"];
 type ChatMessage =
   | { role: "user"; content: string }
-  | { role: "assistant"; content: unknown };
+  | { role: "assistant"; content: AskLedgerlyResponse };
 
 const nav = [
   { label: "Overview", icon: LayoutDashboard },
@@ -118,7 +120,7 @@ export default function Dashboard() {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
-      content: "Ask me about the metrics and trends in your latest business upload.",
+      content: localMarkdownResponse("Ask me about the metrics and trends in your latest business upload."),
     },
   ]);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -211,7 +213,7 @@ export default function Dashboard() {
         if (uploadsResult.value.length === 0) {
           setMessages([{
             role: "assistant",
-            content: "Upload your first business file, then ask me to explain its revenue, expenses, margins, or trends.",
+            content: localMarkdownResponse("Upload your first business file, then ask me to explain its revenue, expenses, margins, or trends."),
           }]);
         }
       }
@@ -303,7 +305,7 @@ export default function Dashboard() {
       const response = await askBusiness(clean);
       setMessages((current) => [
         ...current,
-        { role: "assistant", content: response.answer },
+        { role: "assistant", content: response },
       ]);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -312,7 +314,7 @@ export default function Dashboard() {
       }
       setMessages((current) => [...current, {
         role: "assistant",
-        content: error instanceof Error ? error.message : "I couldn’t reach your business data.",
+        content: localMarkdownResponse(error instanceof Error ? error.message : "I couldn’t reach your business data."),
       }]);
     } finally {
       setChatLoading(false);
@@ -643,7 +645,7 @@ export default function Dashboard() {
         <div className="chat-header"><div><span className="bot-icon"><Bot size={18} /></span><span><strong>Ask Ledgerly</strong><small><i />Ready with your business context</small></span></div><button onClick={() => setChatOpen(false)}><X size={18} /></button></div>
         <div className="chat-context"><Sparkles size={14} /><span>Answering only from <strong>your latest uploaded data</strong></span></div>
         <div className="messages">
-          {messages.map((message, index) => <div key={`${message.role}-${index}`} className={`message ${message.role}`}>{message.role === "assistant" ? <ChatResponseContent content={message.content} /> : <div className="message-content"><p>{message.content}</p></div>}{message.role === "assistant" && livePulse && <small>Based on your latest persisted upload · {confidenceLabel}</small>}</div>)}
+          {messages.map((message, index) => <div key={`${message.role}-${index}`} className={`message ${message.role}`}>{message.role === "assistant" ? <AskLedgerlyResponseRenderer response={message.content} /> : <div className="message-content"><p>{message.content}</p></div>}{message.role === "assistant" && livePulse && <small>Based on your latest persisted upload · {confidenceLabel}</small>}</div>)}
           {chatLoading && <div className="message assistant"><ChatMarkdown content="Reading your business data..." /></div>}
           {messages.length === 1 && livePulse && <div className="quick-questions">{quickQuestions.map((item) => <button key={item} disabled={chatLoading} onClick={() => submitQuestion(item)}>{item}</button>)}</div>}
         </div>

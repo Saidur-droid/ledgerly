@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -68,55 +68,148 @@ class ChatRequest(BaseModel):
 
 
 AnalysisValue = str | int | float | bool | None
+ShortText = Annotated[str, Field(min_length=1, max_length=500)]
+LongText = Annotated[str, Field(min_length=1, max_length=20_000)]
 
 
-class AnalysisColumn(BaseModel):
-    key: str = Field(min_length=1, max_length=80)
-    label: str = Field(min_length=1, max_length=120)
+class ContractModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class AnalysisColumn(ContractModel):
+    label: ShortText
     align: Literal["left", "right"] = "left"
 
 
-class AnalysisTable(BaseModel):
-    columns: list[AnalysisColumn] = Field(min_length=1, max_length=20)
-    rows: list[dict[str, AnalysisValue]] = Field(max_length=100)
+class AnalysisMetric(ContractModel):
+    label: ShortText
+    value: AnalysisValue
+    detail: ShortText | None = None
 
 
-class AnalysisCard(BaseModel):
-    label: str = Field(min_length=1, max_length=120)
-    value: str = Field(min_length=1, max_length=240)
-    detail: str | None = Field(default=None, max_length=500)
+class TextSection(ContractModel):
+    type: Literal["text"]
+    heading: ShortText | None = None
+    markdown: LongText
 
 
-class AnalysisSection(BaseModel):
-    heading: str = Field(min_length=1, max_length=160)
-    markdown: str | None = Field(default=None, max_length=20_000)
-    table: AnalysisTable | None = None
-    cards: list[AnalysisCard] = Field(default_factory=list, max_length=20)
+class MetricsSection(ContractModel):
+    type: Literal["metrics"]
+    heading: ShortText | None = None
+    items: list[AnalysisMetric] = Field(min_length=1, max_length=20)
 
 
-class RankingMetadata(BaseModel):
-    formula: str = Field(min_length=1, max_length=300)
-    weights: dict[str, float]
-    normalization: str = Field(min_length=1, max_length=1_000)
-    first_period: str = Field(min_length=1, max_length=1_000)
-    interpretation: str = Field(min_length=1, max_length=1_000)
+class TableSection(ContractModel):
+    type: Literal["table"]
+    heading: ShortText | None = None
+    columns: list[AnalysisColumn] = Field(min_length=1, max_length=12)
+    rows: list[list[AnalysisValue]] = Field(max_length=50)
+
+    @model_validator(mode="after")
+    def rows_match_columns(self) -> "TableSection":
+        if any(len(row) != len(self.columns) for row in self.rows):
+            raise ValueError("Each table row must match the declared column count.")
+        for row in self.rows:
+            for value in row:
+                if isinstance(value, str) and len(value) > 500:
+                    raise ValueError("Table cell text exceeds 500 characters.")
+        return self
 
 
-class StructuredAnalysis(BaseModel):
-    kind: Literal["structured_analysis"]
-    title: str = Field(min_length=1, max_length=200)
-    summary: str | None = Field(default=None, max_length=5_000)
-    sections: list[AnalysisSection] = Field(default_factory=list, max_length=30)
-    scoring: RankingMetadata | None = None
-    risks: list[str] = Field(default_factory=list, max_length=30)
-    action_plan: list[str] = Field(default_factory=list, max_length=30)
+class ListSection(ContractModel):
+    type: Literal["list"]
+    heading: ShortText | None = None
+    style: Literal["bulleted", "numbered"] = "bulleted"
+    items: list[ShortText] = Field(max_length=30)
 
 
-class ChatResponse(BaseModel):
-    answer: str | StructuredAnalysis
-    confidence: str
-    sources: list[str]
-    disclaimer: str
+class Scenario(ContractModel):
+    name: ShortText
+    assumptions: list[ShortText] = Field(max_length=20)
+    outcomes: list[AnalysisMetric] = Field(max_length=20)
+
+
+class ScenariosSection(ContractModel):
+    type: Literal["scenarios"]
+    heading: ShortText | None = None
+    scenarios: list[Scenario] = Field(min_length=1, max_length=10)
+
+
+class ForecastSection(ContractModel):
+    type: Literal["forecast"]
+    heading: ShortText | None = None
+    summary: LongText
+    horizon: ShortText | None = None
+    methodology: LongText | None = None
+    metrics: list[AnalysisMetric] = Field(default_factory=list, max_length=20)
+    caveats: list[ShortText] = Field(default_factory=list, max_length=20)
+
+
+class Risk(ContractModel):
+    label: ShortText
+    detail: ShortText
+    severity: Literal["low", "medium", "high", "unknown"] = "unknown"
+
+
+class RisksSection(ContractModel):
+    type: Literal["risks"]
+    heading: ShortText | None = None
+    items: list[Risk] = Field(max_length=30)
+
+
+class Action(ContractModel):
+    label: ShortText
+    detail: ShortText | None = None
+    priority: Literal["low", "medium", "high", "unprioritized"] = "unprioritized"
+
+
+class ActionsSection(ContractModel):
+    type: Literal["actions"]
+    heading: ShortText | None = None
+    items: list[Action] = Field(max_length=30)
+
+
+class NoticeSection(ContractModel):
+    type: Literal["notice"]
+    tone: Literal["info", "warning", "policy", "error"] = "info"
+    heading: ShortText | None = None
+    message: LongText
+
+
+AnalysisSection = Annotated[
+    TextSection
+    | MetricsSection
+    | TableSection
+    | ListSection
+    | ScenariosSection
+    | ForecastSection
+    | RisksSection
+    | ActionsSection
+    | NoticeSection,
+    Field(discriminator="type"),
+]
+
+
+class ChatResponse(ContractModel):
+    schema_version: Literal[1] = 1
+    response_type: Literal["markdown", "structured"]
+    correlation_id: str = Field(min_length=8, max_length=64, pattern=r"^[a-zA-Z0-9-]+$")
+    markdown: LongText | None = None
+    sections: list[AnalysisSection] = Field(default_factory=list, max_length=24)
+    confidence: str = Field(min_length=1, max_length=80)
+    sources: list[ShortText] = Field(max_length=20)
+    disclaimer: ShortText
+
+    @model_validator(mode="after")
+    def response_type_matches_content(self) -> "ChatResponse":
+        if self.response_type == "markdown":
+            if self.markdown is None or self.sections:
+                raise ValueError(
+                    "Markdown responses require markdown and cannot contain sections."
+                )
+        elif self.markdown is not None:
+            raise ValueError("Structured responses cannot contain markdown.")
+        return self
 
 
 class UploadRead(BaseModel):

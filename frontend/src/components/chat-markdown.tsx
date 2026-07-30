@@ -1,8 +1,11 @@
 import type { Components } from "react-markdown";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const components: Components = {
+  a({ children, href }) {
+    return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
+  },
   table({ children }) {
     return (
       <div
@@ -17,6 +20,14 @@ const components: Components = {
   },
 };
 
+function safeUrlTransform(url: string) {
+  const normalized = defaultUrlTransform(url);
+  if (normalized.startsWith("/") || normalized.startsWith("#") || /^(https?:|mailto:)/i.test(normalized)) {
+    return normalized;
+  }
+  return "";
+}
+
 export function MarkdownBody({ content }: { content: string }) {
   return (
     <div className="chat-markdown">
@@ -24,6 +35,7 @@ export function MarkdownBody({ content }: { content: string }) {
         remarkPlugins={[remarkGfm]}
         components={components}
         skipHtml
+        urlTransform={safeUrlTransform}
       >
         {content}
       </ReactMarkdown>

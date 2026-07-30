@@ -49,56 +49,273 @@ export type Pulse = {
 export type AnalysisValue = string | number | boolean | null;
 
 export type AnalysisColumn = {
-  key: string;
   label: string;
   align: "left" | "right";
 };
 
-export type AnalysisTable = {
-  columns: AnalysisColumn[];
-  rows: Array<Record<string, AnalysisValue>>;
-};
-
-export type AnalysisCard = {
+export type AnalysisMetric = {
   label: string;
-  value: string;
+  value: AnalysisValue;
   detail?: string | null;
 };
 
-export type AnalysisSection = {
-  heading: string;
-  markdown?: string | null;
-  table?: AnalysisTable | null;
-  cards?: AnalysisCard[];
+export type TextSection = {
+  type: "text";
+  heading?: string | null;
+  markdown: string;
 };
 
-export type RankingMetadata = {
-  formula: string;
-  weights: Record<string, number>;
-  normalization: string;
-  first_period: string;
-  interpretation: string;
+export type MetricsSection = {
+  type: "metrics";
+  heading?: string | null;
+  items: AnalysisMetric[];
 };
 
-export type StructuredAnalysis = {
-  kind: "structured_analysis";
-  title: string;
-  summary?: string | null;
-  sections?: AnalysisSection[];
-  scoring?: RankingMetadata | null;
-  risks?: string[];
-  action_plan?: string[];
+export type TableSection = {
+  type: "table";
+  heading?: string | null;
+  columns: AnalysisColumn[];
+  rows: AnalysisValue[][];
 };
 
-export type ChatAnswer = string | StructuredAnalysis;
+export type ListSection = {
+  type: "list";
+  heading?: string | null;
+  style: "bulleted" | "numbered";
+  items: string[];
+};
 
-export type ChatResponse = {
-  answer: ChatAnswer;
+export type Scenario = {
+  name: string;
+  assumptions: string[];
+  outcomes: AnalysisMetric[];
+};
+
+export type ScenariosSection = {
+  type: "scenarios";
+  heading?: string | null;
+  scenarios: Scenario[];
+};
+
+export type ForecastSection = {
+  type: "forecast";
+  heading?: string | null;
+  summary: string;
+  horizon?: string | null;
+  methodology?: string | null;
+  metrics: AnalysisMetric[];
+  caveats: string[];
+};
+
+export type Risk = {
+  label: string;
+  detail: string;
+  severity: "low" | "medium" | "high" | "unknown";
+};
+
+export type RisksSection = {
+  type: "risks";
+  heading?: string | null;
+  items: Risk[];
+};
+
+export type AnalysisAction = {
+  label: string;
+  detail?: string | null;
+  priority: "low" | "medium" | "high" | "unprioritized";
+};
+
+export type ActionsSection = {
+  type: "actions";
+  heading?: string | null;
+  items: AnalysisAction[];
+};
+
+export type NoticeSection = {
+  type: "notice";
+  heading?: string | null;
+  tone: "info" | "warning" | "policy" | "error";
+  message: string;
+};
+
+export type AnalysisSection =
+  | TextSection
+  | MetricsSection
+  | TableSection
+  | ListSection
+  | ScenariosSection
+  | ForecastSection
+  | RisksSection
+  | ActionsSection
+  | NoticeSection;
+
+type ChatResponseBase = {
+  schema_version: 1;
+  correlation_id: string;
   confidence: string;
   sources: string[];
   disclaimer: string;
 };
 
+export type MarkdownChatResponse = ChatResponseBase & {
+  response_type: "markdown";
+  markdown: string;
+  sections: [];
+};
+
+export type StructuredChatResponse = ChatResponseBase & {
+  response_type: "structured";
+  markdown: null;
+  sections: AnalysisSection[];
+};
+
+export type AskLedgerlyResponse =
+  | MarkdownChatResponse
+  | StructuredChatResponse;
+
+const RESPONSE_LIMITS = {
+  sections: 24,
+  columns: 12,
+  rows: 50,
+  text: 20_000,
+  cell: 500,
+} as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]) {
+  return Object.keys(value).every((key) => keys.includes(key));
+}
+
+function isText(value: unknown, maximum: number = RESPONSE_LIMITS.text): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= maximum;
+}
+
+function isOptionalText(value: unknown, maximum: number = RESPONSE_LIMITS.text) {
+  return value === undefined || value === null || isText(value, maximum);
+}
+
+function isAnalysisValue(value: unknown): value is AnalysisValue {
+  return value === null ||
+    typeof value === "boolean" ||
+    typeof value === "string" && value.length <= RESPONSE_LIMITS.cell ||
+    typeof value === "number" && Number.isFinite(value);
+}
+
+function isMetric(value: unknown): value is AnalysisMetric {
+  return isRecord(value) &&
+    hasOnlyKeys(value, ["label", "value", "detail"]) &&
+    isText(value.label, 500) &&
+    isAnalysisValue(value.value) &&
+    isOptionalText(value.detail, 500);
+}
+
+function isStringList(value: unknown, maximum: number): value is string[] {
+  return Array.isArray(value) && value.length <= maximum &&
+    value.every((item) => isText(item, 500));
+}
+
+function isSection(value: unknown): value is AnalysisSection {
+  if (!isRecord(value) || typeof value.type !== "string") return false;
+  const heading = isOptionalText(value.heading, 500);
+  switch (value.type) {
+    case "text":
+      return hasOnlyKeys(value, ["type", "heading", "markdown"]) &&
+        heading && isText(value.markdown);
+    case "metrics":
+      return hasOnlyKeys(value, ["type", "heading", "items"]) && heading &&
+        Array.isArray(value.items) && value.items.length > 0 &&
+        value.items.length <= 20 && value.items.every(isMetric);
+    case "table": {
+      if (!hasOnlyKeys(value, ["type", "heading", "columns", "rows"]) ||
+        !heading || !Array.isArray(value.columns) || value.columns.length === 0 ||
+        value.columns.length > RESPONSE_LIMITS.columns ||
+        !Array.isArray(value.rows) || value.rows.length > RESPONSE_LIMITS.rows) {
+        return false;
+      }
+      const columnCount = value.columns.length;
+      return value.columns.every((column) => isRecord(column) &&
+          hasOnlyKeys(column, ["label", "align"]) &&
+          isText(column.label, 500) &&
+          (column.align === "left" || column.align === "right")) &&
+        value.rows.every((row) => Array.isArray(row) &&
+          row.length === columnCount && row.every(isAnalysisValue));
+    }
+    case "list":
+      return hasOnlyKeys(value, ["type", "heading", "style", "items"]) &&
+        heading && (value.style === "bulleted" || value.style === "numbered") &&
+        isStringList(value.items, 30);
+    case "scenarios":
+      return hasOnlyKeys(value, ["type", "heading", "scenarios"]) && heading &&
+        Array.isArray(value.scenarios) && value.scenarios.length > 0 &&
+        value.scenarios.length <= 10 && value.scenarios.every((scenario) =>
+          isRecord(scenario) &&
+          hasOnlyKeys(scenario, ["name", "assumptions", "outcomes"]) &&
+          isText(scenario.name, 500) &&
+          isStringList(scenario.assumptions, 20) &&
+          Array.isArray(scenario.outcomes) && scenario.outcomes.length <= 20 &&
+          scenario.outcomes.every(isMetric));
+    case "forecast":
+      return hasOnlyKeys(value, ["type", "heading", "summary", "horizon", "methodology", "metrics", "caveats"]) &&
+        heading && isText(value.summary) && isOptionalText(value.horizon, 500) &&
+        isOptionalText(value.methodology) && Array.isArray(value.metrics) &&
+        value.metrics.length <= 20 && value.metrics.every(isMetric) &&
+        isStringList(value.caveats, 20);
+    case "risks":
+      return hasOnlyKeys(value, ["type", "heading", "items"]) && heading &&
+        Array.isArray(value.items) && value.items.length <= 30 &&
+        value.items.every((risk) => isRecord(risk) &&
+          hasOnlyKeys(risk, ["label", "detail", "severity"]) &&
+          isText(risk.label, 500) && isText(risk.detail, 500) &&
+          ["low", "medium", "high", "unknown"].includes(String(risk.severity)));
+    case "actions":
+      return hasOnlyKeys(value, ["type", "heading", "items"]) && heading &&
+        Array.isArray(value.items) && value.items.length <= 30 &&
+        value.items.every((action) => isRecord(action) &&
+          hasOnlyKeys(action, ["label", "detail", "priority"]) &&
+          isText(action.label, 500) && isOptionalText(action.detail, 500) &&
+          ["low", "medium", "high", "unprioritized"].includes(String(action.priority)));
+    case "notice":
+      return hasOnlyKeys(value, ["type", "heading", "tone", "message"]) &&
+        heading && ["info", "warning", "policy", "error"].includes(String(value.tone)) &&
+        isText(value.message);
+    default:
+      return false;
+  }
+}
+
+export function parseAskLedgerlyResponse(value: unknown): AskLedgerlyResponse | null {
+  if (!isRecord(value) ||
+    !hasOnlyKeys(value, ["schema_version", "response_type", "correlation_id", "markdown", "sections", "confidence", "sources", "disclaimer"]) ||
+    value.schema_version !== 1 || !isText(value.correlation_id, 64) ||
+    !isText(value.confidence, 80) || !isStringList(value.sources, 20) ||
+    !isText(value.disclaimer, 500) || !Array.isArray(value.sections) ||
+    value.sections.length > RESPONSE_LIMITS.sections) return null;
+  if (value.response_type === "markdown") {
+    return isText(value.markdown) && value.sections.length === 0
+      ? value as MarkdownChatResponse : null;
+  }
+  if (value.response_type === "structured") {
+    return value.markdown === null && value.sections.every(isSection)
+      ? value as StructuredChatResponse : null;
+  }
+  return null;
+}
+
+export function localMarkdownResponse(markdown: string): MarkdownChatResponse {
+  return {
+    schema_version: 1,
+    response_type: "markdown",
+    correlation_id: "local-ui",
+    markdown,
+    sections: [],
+    confidence: "local",
+    sources: [],
+    disclaimer: "Ledgerly explains uploaded business data only.",
+  };
+}
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -240,10 +457,19 @@ export function uploadBusinessData(file: File) {
 }
 
 export function askBusiness(question: string) {
-  return request<ChatResponse>("/api/v1/chat", {
+  return request<unknown>("/api/v1/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question }),
+  }).then((payload) => {
+    const response = parseAskLedgerlyResponse(payload);
+    if (!response) {
+      throw new ApiError(
+        "Ledgerly received an invalid analysis response. Please try again.",
+        502,
+      );
+    }
+    return response;
   });
 }
 
