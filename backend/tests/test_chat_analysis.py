@@ -11,6 +11,7 @@ from app.ai.analysis import (
     _periods,
     _rank_scores,
     _ranking_groups,
+    _requested_ranking_count,
 )
 from app.core.database import SessionLocal
 from app.models import Upload
@@ -153,6 +154,66 @@ def test_chat_questions_use_persisted_rows_and_produce_distinct_answers(client):
     assert "min–max normalized" in ranking_method
     assert "highest-profit month may not rank first" in ranking_method
     assert "neutral normalized growth score of 0.50" in ranking_method
+
+
+@pytest.mark.parametrize(
+    ("question", "expected_count"),
+    [
+        (
+            "Show the 3 strongest and 3 weakest periods with exact values.",
+            3,
+        ),
+        (
+            "Identify the five best and five worst months using the composite score.",
+            5,
+        ),
+        (
+            "Return the top 10 and bottom 10 periods, model a scenario, forecast "
+            "the next period, and rank risks.",
+            10,
+        ),
+    ],
+)
+def test_requested_ranking_count_controls_headings_and_rows(
+    client,
+    question: str,
+    expected_count: int,
+):
+    headers = _register(client, f"ranking-count-{expected_count}@example.com")
+    _upload_fixture(client, headers)
+
+    response = client.post(
+        "/api/v1/chat",
+        headers=headers,
+        json={"question": question},
+    )
+
+    assert response.status_code == 200
+    tables = [
+        section
+        for section in response.json()["sections"]
+        if section["type"] == "table"
+    ]
+    assert [table["heading"] for table in tables[:2]] == [
+        f"{expected_count} best months",
+        f"{expected_count} worst months",
+    ]
+    assert [len(table["rows"]) for table in tables[:2]] == [
+        expected_count,
+        expected_count,
+    ]
+    assert {
+        row[1] for table in tables[:1] for row in table["rows"]
+    }.isdisjoint(
+        {row[1] for row in tables[1]["rows"]}
+    )
+
+
+def test_ranking_count_defaults_to_five_and_ignores_scenario_percentages():
+    assert _requested_ranking_count("Show the best and worst months.") == 5
+    assert _requested_ranking_count(
+        "Show the best and worst months under a +10% revenue scenario."
+    ) == 5
 
 
 def test_cash_answer_uses_latest_balance_instead_of_sum(client):

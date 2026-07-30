@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 PERIOD_ANALYSIS = re.compile(
-    r"\b(best|worst|top|bottom|monthly row|each month|each period)\b",
+    r"\b(best|worst|strongest|weakest|top|bottom|monthly row|each month|each period)\b",
     re.IGNORECASE,
 )
 AGGREGATE_ANALYSIS = re.compile(
@@ -59,6 +59,42 @@ RANKING_WEIGHTS = {
 }
 MISSING_GROWTH_SCORE = 0.50
 RANKING_FORMULA = "40% profit + 35% net margin + 25% revenue growth"
+DEFAULT_RANKING_COUNT = 5
+MAX_RANKING_COUNT = 25
+RANKING_COUNT_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+}
+RANKING_COUNT_TOKEN = rf"(?:\d+|{'|'.join(RANKING_COUNT_WORDS)})"
+RANKING_TERM = r"(?:best|worst|strongest|weakest|top|bottom)"
+RANKING_COUNT_PATTERNS = (
+    re.compile(
+        rf"\b(?P<count>{RANKING_COUNT_TOKEN})\s+{RANKING_TERM}\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"\b{RANKING_TERM}\s+(?P<count>{RANKING_COUNT_TOKEN})\b",
+        re.IGNORECASE,
+    ),
+)
 
 
 def _number(value: Any) -> float | None:
@@ -140,6 +176,17 @@ def _money(value: float | None) -> str:
 
 def _percent(value: float | None) -> str:
     return "N/A" if value is None else f"{value:,.2f}%"
+
+
+def _requested_ranking_count(question: str) -> int:
+    for pattern in RANKING_COUNT_PATTERNS:
+        match = pattern.search(question)
+        if match is None:
+            continue
+        token = match.group("count").lower()
+        count = int(token) if token.isdigit() else RANKING_COUNT_WORDS[token]
+        return min(max(count, 1), MAX_RANKING_COUNT)
+    return DEFAULT_RANKING_COUNT
 
 
 def _range_description(periods: list[dict[str, Any]]) -> str:
@@ -248,23 +295,28 @@ def _period_section(
 
 def _ranking_groups(
     ranked: list[dict[str, Any]],
+    count: int = DEFAULT_RANKING_COUNT,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    best_count = min(5, (len(ranked) + 1) // 2)
-    worst_count = min(5, len(ranked) - best_count)
-    best = ranked[:best_count]
-    bottom = ranked[-worst_count:] if worst_count else []
+    if len(ranked) == 1:
+        return ranked[:1], []
+    group_count = min(max(count, 1), len(ranked) // 2)
+    best = ranked[:group_count]
+    bottom = ranked[-group_count:] if group_count else []
     worst = sorted(bottom, key=lambda item: item["ranking_score"])
     return best, worst
 
 
-def _best_worst_answer(periods: list[dict[str, Any]]) -> str | dict[str, Any]:
+def _best_worst_answer(
+    question: str,
+    periods: list[dict[str, Any]],
+) -> str | dict[str, Any]:
     ranked = _rank_scores(periods)
     if not ranked:
         return (
             "The latest upload does not contain enough row-level revenue, "
             "expenses, and profit data to rank periods."
         )
-    best, worst = _ranking_groups(ranked)
+    best, worst = _ranking_groups(ranked, _requested_ranking_count(question))
     sections = [_period_section(f"{len(best)} best months", best)]
     if worst:
         sections.append(_period_section(f"{len(worst)} worst months", worst))
@@ -618,7 +670,7 @@ def _comprehensive_answer(
     periods: list[dict[str, Any]],
 ) -> dict[str, Any]:
     ranked = _rank_scores(periods)
-    best, worst = _ranking_groups(ranked)
+    best, worst = _ranking_groups(ranked, _requested_ranking_count(question))
     metrics = context.get("metrics", {})
     revenue = _number(metrics.get("revenue"))
     expenses = _number(metrics.get("expenses"))
@@ -860,7 +912,7 @@ def deterministic_answer(
     ):
         return _reconciliation_answer(periods)
     if PERIOD_ANALYSIS.search(question):
-        return _best_worst_answer(periods)
+        return _best_worst_answer(question, periods)
     if SEASONALITY_ANALYSIS.search(question):
         return _seasonality_answer(periods)
     if FORECAST_ANALYSIS.search(question):
