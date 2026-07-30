@@ -37,6 +37,9 @@ PROMPT_B = (
     "five worst months using profit, net margin, and revenue growth. Include "
     "the exact month and values in a table."
 )
+EXPECTED_RANKING_FORMULA = (
+    "40% profit + 35% net margin + 25% revenue growth"
+)
 
 
 def require(condition: bool, message: str) -> None:
@@ -207,6 +210,13 @@ def run_smoke_test(api_url: str, check_database: bool) -> None:
             and "December 2025" in period_chat["answer"]
             and "March 2023" in period_chat["answer"],
             "Period chat answer did not analyze persisted monthly rows.",
+        )
+        require(
+            EXPECTED_RANKING_FORMULA in period_chat["answer"]
+            and "min–max normalized" in period_chat["answer"]
+            and "neutral normalized growth score of 0.50"
+            in period_chat["answer"],
+            "Period chat answer did not explain its ranking methodology.",
         )
 
         report = client.get("/api/v1/reports/latest.pdf", headers=headers)

@@ -36,6 +36,13 @@ SCENARIO_ANALYSIS = re.compile(
     r"\b(scenario|what if|sensitivity)\b",
     re.IGNORECASE,
 )
+RANKING_WEIGHTS = {
+    "profit": 0.40,
+    "net_margin": 0.35,
+    "revenue_growth": 0.25,
+}
+MISSING_GROWTH_SCORE = 0.50
+RANKING_FORMULA = "40% profit + 35% net margin + 25% revenue growth"
 
 
 def _number(value: Any) -> float | None:
@@ -157,42 +164,43 @@ def _rank_scores(periods: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
     if not analyzable:
         return []
-    for metric in ("profit", "net_margin", "revenue_growth"):
-        available = sorted(
-            (
-                (float(period[metric]), period["position"])
-                for period in analyzable
-                if period[metric] is not None
-            ),
-            key=lambda item: (item[0], item[1]),
-        )
-        rank_by_position = {
-            position: (rank / (len(available) - 1) if len(available) > 1 else 0.5)
-            for rank, (_, position) in enumerate(available)
-        }
+    for metric, weight in RANKING_WEIGHTS.items():
+        available = [
+            float(period[metric])
+            for period in analyzable
+            if period[metric] is not None
+        ]
+        minimum = min(available)
+        maximum = max(available)
+        value_range = maximum - minimum
         for period in analyzable:
-            period[f"{metric}_rank"] = rank_by_position.get(period["position"], 0.5)
+            value = period[metric]
+            normalized = (
+                MISSING_GROWTH_SCORE
+                if value is None
+                else (
+                    (float(value) - minimum) / value_range
+                    if value_range
+                    else MISSING_GROWTH_SCORE
+                )
+            )
+            period[f"{metric}_normalized"] = normalized
+            period[f"{metric}_weighted"] = normalized * weight
     for period in analyzable:
         period["ranking_score"] = sum(
-            float(period[f"{metric}_rank"])
-            for metric in ("profit", "net_margin", "revenue_growth")
-        ) / 3
+            float(period[f"{metric}_weighted"])
+            for metric in RANKING_WEIGHTS
+        )
     return sorted(
         analyzable,
-        key=lambda item: (
-            item["ranking_score"],
-            item["profit"],
-            item["net_margin"],
-            item["revenue_growth"] if item["revenue_growth"] is not None else 0,
-            item["position"],
-        ),
+        key=lambda item: item["ranking_score"],
         reverse=True,
     )
 
 
 def _period_table(title: str, periods: list[dict[str, Any]]) -> str:
     lines = [
-        title,
+        f"### {title}",
         "| Rank | Month | Revenue | Expenses | Profit | Net margin | Revenue growth |",
         "|---:|---|---:|---:|---:|---:|---:|",
     ]
@@ -206,6 +214,17 @@ def _period_table(title: str, periods: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _ranking_groups(
+    ranked: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    best_count = min(5, (len(ranked) + 1) // 2)
+    worst_count = min(5, len(ranked) - best_count)
+    best = ranked[:best_count]
+    bottom = ranked[-worst_count:] if worst_count else []
+    worst = sorted(bottom, key=lambda item: item["ranking_score"])
+    return best, worst
+
+
 def _best_worst_answer(periods: list[dict[str, Any]]) -> str:
     ranked = _rank_scores(periods)
     if not ranked:
@@ -213,18 +232,25 @@ def _best_worst_answer(periods: list[dict[str, Any]]) -> str:
             "The latest upload does not contain enough row-level revenue, "
             "expenses, and profit data to rank periods."
         )
-    count = min(5, len(ranked))
-    best = ranked[:count]
-    worst = list(reversed(ranked[-count:]))
+    best, worst = _ranking_groups(ranked)
+    tables = [_period_table(f"{len(best)} best months", best)]
+    if worst:
+        tables.append(_period_table(f"{len(worst)} worst months", worst))
+    tables_text = "\n\n".join(tables)
     return (
         f"I analyzed {len(ranked)} persisted rows from "
         f"{_range_description(periods)}.\n\n"
-        f"{_period_table(f'{count} best months', best)}\n\n"
-        f"{_period_table(f'{count} worst months', worst)}\n\n"
-        "Ranking method: profit, net margin, and period-over-period revenue "
-        "growth receive equal weight. Higher composite scores rank better; "
-        "the first period receives a neutral growth rank because no preceding "
-        "period exists in the current upload."
+        f"{tables_text}\n\n"
+        "### Ranking method\n\n"
+        f"**Composite score:** `{RANKING_FORMULA}`\n\n"
+        "Each input is min–max normalized to a 0–1 score across the persisted "
+        "months before its weight is applied. Rankings use the combined score, "
+        "so the highest-profit month may not rank first when its margin or "
+        "growth is weaker.\n\n"
+        f"The first chronological month has no prior-period growth value, so it "
+        f"receives a neutral normalized growth score of {MISSING_GROWTH_SCORE:.2f}. "
+        "Negative growth remains negative before normalization and is ranked "
+        "relative to the other observed growth values."
     )
 
 

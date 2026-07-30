@@ -1,7 +1,16 @@
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 
+from app.ai.analysis import (
+    MISSING_GROWTH_SCORE,
+    RANKING_FORMULA,
+    RANKING_WEIGHTS,
+    _periods,
+    _rank_scores,
+    _ranking_groups,
+)
 from app.core.database import SessionLocal
 from app.models import Upload
 
@@ -127,6 +136,10 @@ def test_chat_questions_use_persisted_rows_and_produce_distinct_answers(client):
     ) in period_answer
     assert "previous upload" not in aggregate_answer.lower()
     assert "previous upload" not in period_answer.lower()
+    assert RANKING_FORMULA in period_answer
+    assert "min–max normalized" in period_answer
+    assert "highest-profit month may not rank first" in period_answer
+    assert "neutral normalized growth score of 0.50" in period_answer
     assert aggregate.json()["confidence"] == "data-grounded"
     assert period_analysis.json()["confidence"] == "data-grounded"
 
@@ -194,3 +207,93 @@ def test_chat_empty_upload_behavior_remains_clear(client):
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Upload business data first."}
+
+
+def test_ranking_sorts_dates_normalizes_inputs_and_handles_first_growth():
+    periods = _periods(
+        {
+            "data": {
+                "records": [
+                    {
+                        "date": "2026-03-31",
+                        "revenue": 90,
+                        "expenses": 50,
+                    },
+                    {
+                        "date": "2026-01-31",
+                        "revenue": 100,
+                        "expenses": 70,
+                    },
+                    {
+                        "date": "2026-02-28",
+                        "revenue": 80,
+                        "expenses": 65,
+                    },
+                ]
+            }
+        }
+    )
+    ranked = _rank_scores(periods)
+
+    assert [period["label"] for period in periods] == [
+        "January 2026",
+        "February 2026",
+        "March 2026",
+    ]
+    assert periods[0]["revenue_growth"] is None
+    assert periods[1]["revenue_growth"] == -20
+    assert periods[2]["revenue_growth"] == 12.5
+    first = next(period for period in ranked if period["label"] == "January 2026")
+    declining = next(
+        period for period in ranked if period["label"] == "February 2026"
+    )
+    growing = next(period for period in ranked if period["label"] == "March 2026")
+    assert RANKING_WEIGHTS == {
+        "profit": 0.40,
+        "net_margin": 0.35,
+        "revenue_growth": 0.25,
+    }
+    assert sum(RANKING_WEIGHTS.values()) == pytest.approx(1.0)
+    assert first["revenue_growth_normalized"] == MISSING_GROWTH_SCORE
+    assert declining["revenue_growth_normalized"] == 0
+    assert growing["revenue_growth_normalized"] == 1
+    assert all(
+        0 <= period[f"{metric}_normalized"] <= 1
+        for period in ranked
+        for metric in RANKING_WEIGHTS
+    )
+    assert all(
+        period["ranking_score"]
+        == pytest.approx(
+            sum(
+                period[f"{metric}_normalized"] * weight
+                for metric, weight in RANKING_WEIGHTS.items()
+            )
+        )
+        for period in ranked
+    )
+
+
+def test_ranking_ties_are_stable_and_best_worst_do_not_overlap():
+    tied_periods = [
+        {
+            "position": position,
+            "label": f"Period {position}",
+            "date": f"2026-0{position + 1}-28",
+            "revenue": 100.0,
+            "expenses": 50.0,
+            "profit": 50.0,
+            "net_margin": 50.0,
+            "revenue_growth": 0.0,
+        }
+        for position in range(6)
+    ]
+    ranked = _rank_scores(tied_periods)
+    best, worst = _ranking_groups(ranked)
+
+    assert [period["position"] for period in ranked] == list(range(6))
+    assert {period["position"] for period in best}.isdisjoint(
+        {period["position"] for period in worst}
+    )
+    assert len(best) == 3
+    assert len(worst) == 3
