@@ -24,7 +24,7 @@ from app.business_pulse.engine import calculate_pulse, compare_metrics
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import create_access_token, get_current_user, hash_password, verify_password
-from app.models import CleaningIssue, DataSourceProfile, ReconciliationMatch, ReconciliationRun, SourceMapping, Upload, User, utcnow
+from app.models import CleaningIssue, DataSourceProfile, ReconciliationAuditEvent, ReconciliationMatch, ReconciliationRun, SourceMapping, Upload, User, utcnow
 from app.report_engine.pdf import build_pulse_report
 from app.schemas import (
     ChatRequest,
@@ -39,6 +39,9 @@ from app.schemas import (
     CleaningDecision,
     MappingUpdate,
     MatchDecision,
+    ManualMatchCreate,
+    ReconciliationAction,
+    BalanceUpdate,
     ReconciliationCreate,
 )
 
@@ -251,6 +254,7 @@ def create_reconciliation(payload: ReconciliationCreate, user: User = Depends(ge
     ledger_tx = canonical_transactions(ledger.normalized_data.get("records", []), profiles[ledger.id].column_mapping)
     for result in exact_matches(bank_tx, ledger_tx):
         db.add(ReconciliationMatch(run_id=run.id, **result))
+    db.add(ReconciliationAuditEvent(run_id=run.id, actor_user_id=user.id, action="created", details={"bank_upload_id": bank.id, "ledger_upload_id": ledger.id}))
     db.commit()
     return reconciliation_detail(run.id, user, db)
 
@@ -261,21 +265,135 @@ def reconciliation_detail(run_id: int, user: User = Depends(get_current_user), d
     if run is None:
         raise HTTPException(status_code=404, detail="Reconciliation not found.")
     matches = db.scalars(select(ReconciliationMatch).where(ReconciliationMatch.run_id == run.id).order_by(ReconciliationMatch.id)).all()
-    exact = sum(match.match_type == "exact" and match.status != "rejected" for match in matches)
+    exact = sum(match.match_type == "exact" for match in matches)
     bank_rows = {match.bank_row for match in matches if match.bank_row is not None}
-    return {"id": run.id, "status": run.status, "bank_upload_id": run.bank_upload_id, "ledger_upload_id": run.ledger_upload_id, "completion_percent": round(exact / len(bank_rows) * 100, 1) if bank_rows else 0, "counts": dict(Counter(match.match_type for match in matches)), "matches": [_model_values(match) for match in matches]}
+    approved = sum(match.status in {"approved", "manual"} for match in matches)
+    resolved = sum(match.bank_row is not None and (match.status in {"approved", "manual", "rejected"} or match.match_type == "exact") for match in matches)
+    pending_exceptions = sum(bool(match.exception_type) and match.exception_status == "pending" for match in matches)
+    ledger_values: dict[int, float] = {}
+    for match in matches:
+        ledger = match.evidence.get("ledger") or {}
+        if match.ledger_row is not None and ledger:
+            ledger_values.setdefault(match.ledger_row, float(ledger.get("signed_amount") or 0))
+    ledger_movement = round(sum(ledger_values.values()), 2)
+    statement_movement = None if run.opening_balance is None or run.closing_balance is None else round(run.closing_balance - run.opening_balance, 2)
+    variance = None if statement_movement is None else round(statement_movement - ledger_movement, 2)
+    counts = dict(Counter(match.match_type for match in matches))
+    counts.update({"exceptions": sum(bool(m.exception_type) for m in matches), "approved": approved})
+    events = db.scalars(select(ReconciliationAuditEvent).where(ReconciliationAuditEvent.run_id == run.id).order_by(ReconciliationAuditEvent.id.desc())).all()
+    return {"id": run.id, "status": run.status, "bank_upload_id": run.bank_upload_id, "ledger_upload_id": run.ledger_upload_id, "completion_percent": round(min(resolved, len(bank_rows)) / len(bank_rows) * 100, 1) if bank_rows else 100.0, "counts": counts, "balance": {"opening_balance": run.opening_balance, "closing_balance": run.closing_balance, "calculated_movement": ledger_movement, "statement_movement": statement_movement, "variance": variance, "passed": variance == 0 if variance is not None else False}, "checklist": {"all_items_reviewed": all(m.status in {"approved", "manual", "rejected"} for m in matches), "exceptions_resolved": pending_exceptions == 0, "balances_validated": variance == 0 if variance is not None else False}, "matches": [_model_values(match) for match in matches], "audit_history": [_model_values(event) for event in events]}
+
+
+@router.get("/reconciliations")
+def list_reconciliations(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[dict]:
+    runs = db.scalars(select(ReconciliationRun).where(ReconciliationRun.user_id == user.id).order_by(ReconciliationRun.id.desc())).all()
+    return [{"id": run.id, "status": run.status, "bank_upload_id": run.bank_upload_id, "ledger_upload_id": run.ledger_upload_id, "created_at": run.created_at} for run in runs]
 
 
 @router.patch("/reconciliations/{run_id}/matches/{match_id}")
 def review_match(run_id: int, match_id: int, payload: MatchDecision, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
-    run = db.scalar(select(ReconciliationRun).where(ReconciliationRun.id == run_id, ReconciliationRun.user_id == user.id))
-    if run is None:
-        raise HTTPException(status_code=404, detail="Reconciliation not found.")
+    run = _owned_run(db, user.id, run_id)
+    _ensure_editable(run)
     match = db.scalar(select(ReconciliationMatch).where(ReconciliationMatch.id == match_id, ReconciliationMatch.run_id == run.id))
     if match is None:
         raise HTTPException(status_code=404, detail="Match not found.")
-    match.status = payload.status; db.commit()
+    if _idempotent(db, run.id, user.id, payload.idempotency_key):
+        return {"id": match.id, "status": match.status}
+    before = _model_values(match)
+    match.status, match.review_note, match.reviewed_at = payload.status, payload.note, utcnow()
+    match.exception_status = "resolved" if match.exception_type and payload.status in {"approved", "rejected"} else match.exception_status
+    match.final_state = {"bank_row": match.bank_row, "ledger_row": match.ledger_row, "status": match.status}
+    _audit(db, run, user, "match_reviewed", match, {"before": before, "after": match.final_state, "note": payload.note}, payload.idempotency_key)
+    db.commit()
     return {"id": match.id, "status": match.status}
+
+
+@router.post("/reconciliations/{run_id}/matches")
+def manual_match(run_id: int, payload: ManualMatchCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    run = _owned_run(db, user.id, run_id); _ensure_editable(run)
+    existing = _idempotent(db, run.id, user.id, payload.idempotency_key)
+    if existing:
+        return reconciliation_detail(run.id, user, db)
+    matches = db.scalars(select(ReconciliationMatch).where(ReconciliationMatch.run_id == run.id)).all()
+    bank = next((m for m in matches if m.bank_row == payload.bank_row), None)
+    ledger = next((m for m in matches if m.ledger_row == payload.ledger_row), None)
+    if bank is None or ledger is None:
+        raise HTTPException(status_code=400, detail="Both source rows must exist in this reconciliation.")
+    if any(m.status in {"approved", "manual"} and (m.bank_row == payload.bank_row or m.ledger_row == payload.ledger_row) for m in matches):
+        raise HTTPException(status_code=409, detail="One of these rows already has an approved match. Unmatch it first.")
+    evidence = {"bank": bank.evidence.get("bank"), "ledger": ledger.evidence.get("ledger"), "manual": True}
+    state = {"bank_row": payload.bank_row, "ledger_row": payload.ledger_row, "match_type": "manual"}
+    created = ReconciliationMatch(run_id=run.id, bank_row=payload.bank_row, ledger_row=payload.ledger_row, match_type="manual", score=1, rule="manually matched by reviewer", amount=(evidence.get("bank") or {}).get("amount"), transaction_date=(evidence.get("bank") or {}).get("date"), status="manual", evidence=evidence, review_note=payload.note, original_state={}, suggested_state={}, final_state=state, reviewed_at=utcnow())
+    bank.status = "rejected"; bank.exception_status = "resolved"
+    if ledger.id != bank.id: ledger.status = "rejected"; ledger.exception_status = "resolved"
+    db.add(created); db.flush(); _audit(db, run, user, "manual_match", created, state | {"note": payload.note}, payload.idempotency_key); db.commit()
+    return reconciliation_detail(run.id, user, db)
+
+
+@router.post("/reconciliations/{run_id}/matches/{match_id}/unmatch")
+def unmatch(run_id: int, match_id: int, payload: ReconciliationAction, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    run = _owned_run(db, user.id, run_id); _ensure_editable(run)
+    match = db.scalar(select(ReconciliationMatch).where(ReconciliationMatch.id == match_id, ReconciliationMatch.run_id == run.id))
+    if match is None: raise HTTPException(status_code=404, detail="Match not found.")
+    if not _idempotent(db, run.id, user.id, payload.idempotency_key):
+        match.status, match.final_state, match.review_note, match.reviewed_at = "rejected", {"unmatched": True}, payload.note, utcnow()
+        _audit(db, run, user, "unmatched", match, {"note": payload.note}, payload.idempotency_key); db.commit()
+    return reconciliation_detail(run.id, user, db)
+
+
+@router.post("/reconciliations/{run_id}/bulk-approve-exact")
+def bulk_approve_exact(run_id: int, payload: ReconciliationAction, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    run = _owned_run(db, user.id, run_id); _ensure_editable(run)
+    if not _idempotent(db, run.id, user.id, payload.idempotency_key):
+        matches = db.scalars(select(ReconciliationMatch).where(ReconciliationMatch.run_id == run.id, ReconciliationMatch.match_type == "exact", ReconciliationMatch.status == "pending", ReconciliationMatch.score >= .95)).all()
+        for match in matches: match.status, match.final_state, match.reviewed_at = "approved", match.suggested_state, utcnow()
+        _audit(db, run, user, "bulk_approved_exact", None, {"count": len(matches)}, payload.idempotency_key); db.commit()
+    return reconciliation_detail(run.id, user, db)
+
+
+@router.put("/reconciliations/{run_id}/balance")
+def update_balance(run_id: int, payload: BalanceUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    run = _owned_run(db, user.id, run_id); _ensure_editable(run)
+    run.opening_balance, run.closing_balance = payload.opening_balance, payload.closing_balance
+    _audit(db, run, user, "balance_updated", None, payload.model_dump(), None); db.commit()
+    return reconciliation_detail(run.id, user, db)
+
+
+@router.post("/reconciliations/{run_id}/complete")
+def complete_reconciliation(run_id: int, payload: ReconciliationAction, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    run = _owned_run(db, user.id, run_id); _ensure_editable(run)
+    detail = reconciliation_detail(run.id, user, db)
+    failed = [name for name, passed in detail["checklist"].items() if not passed]
+    if failed: raise HTTPException(status_code=409, detail=f"Cannot complete: {', '.join(failed).replace('_', ' ')}.")
+    run.status, run.completed_at = "completed", utcnow(); _audit(db, run, user, "completed", None, {"note": payload.note}, payload.idempotency_key); db.commit()
+    return reconciliation_detail(run.id, user, db)
+
+
+@router.post("/reconciliations/{run_id}/reopen")
+def reopen_reconciliation(run_id: int, payload: ReconciliationAction, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    run = _owned_run(db, user.id, run_id)
+    if run.status != "completed": raise HTTPException(status_code=409, detail="Only completed reconciliations can be reopened.")
+    if not _idempotent(db, run.id, user.id, payload.idempotency_key):
+        run.status, run.completed_at = "review", None; _audit(db, run, user, "reopened", None, {"note": payload.note}, payload.idempotency_key); db.commit()
+    return reconciliation_detail(run.id, user, db)
+
+
+def _owned_run(db: Session, user_id: int, run_id: int) -> ReconciliationRun:
+    run = db.scalar(select(ReconciliationRun).where(ReconciliationRun.id == run_id, ReconciliationRun.user_id == user_id))
+    if run is None: raise HTTPException(status_code=404, detail="Reconciliation not found.")
+    return run
+
+
+def _ensure_editable(run: ReconciliationRun) -> None:
+    if run.status == "completed": raise HTTPException(status_code=409, detail="Completed reconciliations are read-only. Reopen this run to make changes.")
+
+
+def _idempotent(db: Session, run_id: int, user_id: int, key: str | None) -> ReconciliationAuditEvent | None:
+    return None if not key else db.scalar(select(ReconciliationAuditEvent).where(ReconciliationAuditEvent.run_id == run_id, ReconciliationAuditEvent.actor_user_id == user_id, ReconciliationAuditEvent.idempotency_key == key))
+
+
+def _audit(db: Session, run: ReconciliationRun, user: User, action: str, match: ReconciliationMatch | None, details: dict, key: str | None) -> None:
+    db.add(ReconciliationAuditEvent(run_id=run.id, match_id=match.id if match else None, actor_user_id=user.id, action=action, details=details, idempotency_key=key))
 
 
 @router.get("/uploads", response_model=list[UploadRead])

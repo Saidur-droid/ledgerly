@@ -38,6 +38,9 @@ export type DataInboxDetail = {
   summary: { total: number; pending: number; errors: number };
 };
 
+export type ReconciliationMatch = { id: number; bank_row: number | null; ledger_row: number | null; match_type: "exact" | "possible" | "unmatched" | "manual"; score: number; rule: string; amount: number | null; transaction_date: string | null; status: "pending" | "approved" | "rejected" | "manual"; evidence: Record<string, unknown>; exception_type: string | null; exception_status: string | null; review_note: string | null };
+export type Reconciliation = { id: number; status: "review" | "completed"; bank_upload_id: number; ledger_upload_id: number; completion_percent: number; counts: Record<string, number>; balance: { opening_balance: number | null; closing_balance: number | null; calculated_movement: number; statement_movement: number | null; variance: number | null; passed: boolean }; checklist: Record<string, boolean>; matches: ReconciliationMatch[]; audit_history: Array<{ id: number; action: string; actor_user_id: number; created_at: string; details: Record<string, unknown> }> };
+
 export type Pulse = {
   score: number;
   confidence: number;
@@ -479,6 +482,15 @@ export function approveMapping(uploadId: number, profile: DataInboxDetail["profi
 export function reviewCleaningIssue(uploadId: number, issueId: number, status: "approved" | "rejected", finalValue: unknown) {
   return request(`/api/v1/data-inbox/${uploadId}/issues/${issueId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, final_value: finalValue }) });
 }
+
+export function listReconciliations() { return request<Array<{ id: number; status: string }>>("/api/v1/reconciliations"); }
+export function getReconciliation(id: number) { return request<Reconciliation>(`/api/v1/reconciliations/${id}`); }
+export function createReconciliation(bank_upload_id: number, ledger_upload_id: number) { return request<Reconciliation>("/api/v1/reconciliations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bank_upload_id, ledger_upload_id }) }); }
+export function reviewReconciliationMatch(runId: number, matchId: number, status: "approved" | "rejected" | "pending", note?: string) { return request(`/api/v1/reconciliations/${runId}/matches/${matchId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, note, idempotency_key: crypto.randomUUID() }) }); }
+export function reconciliationAction(runId: number, action: "bulk-approve-exact" | "complete" | "reopen", note?: string) { return request<Reconciliation>(`/api/v1/reconciliations/${runId}/${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note, idempotency_key: crypto.randomUUID() }) }); }
+export function unmatchReconciliation(runId: number, matchId: number, note?: string) { return request<Reconciliation>(`/api/v1/reconciliations/${runId}/matches/${matchId}/unmatch`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note, idempotency_key: crypto.randomUUID() }) }); }
+export function manualReconciliationMatch(runId: number, bank_row: number, ledger_row: number, note?: string) { return request<Reconciliation>(`/api/v1/reconciliations/${runId}/matches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bank_row, ledger_row, note, idempotency_key: crypto.randomUUID() }) }); }
+export function updateReconciliationBalance(runId: number, opening_balance: number, closing_balance: number) { return request<Reconciliation>(`/api/v1/reconciliations/${runId}/balance`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ opening_balance, closing_balance }) }); }
 
 export function getLatestPulse() {
   return request<Pulse>("/api/v1/pulse/latest");

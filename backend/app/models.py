@@ -109,8 +109,12 @@ class ReconciliationRun(Base):
     bank_upload_id: Mapped[int] = mapped_column(ForeignKey("uploads.id", ondelete="CASCADE"))
     ledger_upload_id: Mapped[int] = mapped_column(ForeignKey("uploads.id", ondelete="CASCADE"))
     status: Mapped[str] = mapped_column(String(20), default="review")
+    opening_balance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    closing_balance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     matches: Mapped[list["ReconciliationMatch"]] = relationship(cascade="all, delete-orphan")
+    audit_events: Mapped[list["ReconciliationAuditEvent"]] = relationship(cascade="all, delete-orphan")
 
 
 class ReconciliationMatch(Base):
@@ -125,5 +129,25 @@ class ReconciliationMatch(Base):
     rule: Mapped[str] = mapped_column(String(120))
     amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     transaction_date: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="suggested")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     evidence: Mapped[dict] = mapped_column(JSON, default=dict)
+    exception_type: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    exception_status: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    original_state: Mapped[dict] = mapped_column(JSON, default=dict)
+    suggested_state: Mapped[dict] = mapped_column(JSON, default=dict)
+    final_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ReconciliationAuditEvent(Base):
+    __tablename__ = "reconciliation_audit_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("reconciliation_runs.id", ondelete="CASCADE"), index=True)
+    match_id: Mapped[int | None] = mapped_column(ForeignKey("reconciliation_matches.id", ondelete="SET NULL"), nullable=True, index=True)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    action: Mapped[str] = mapped_column(String(40), index=True)
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -96,14 +96,18 @@ def canonical_transactions(records: list[dict[str, Any]], mapping: dict[str, str
         def value(name: str) -> Any:
             return row.get(mapping[name]) if name in mapping else None
         raw_amount = value("amount")
+        direction = 1
         if raw_amount is None:
-            raw_amount = value("credit") or value("debit")
+            credit, debit = value("credit"), value("debit")
+            raw_amount = credit if credit not in (None, "") else debit
+            direction = -1 if debit not in (None, "") and credit in (None, "") else 1
         try:
-            amount = abs(float(re.sub(r"[^0-9.\-]", "", str(raw_amount))))
+            signed_amount = float(re.sub(r"[^0-9.\-]", "", str(raw_amount))) * direction
+            amount = abs(signed_amount)
         except (TypeError, ValueError):
-            amount = None
+            amount = signed_amount = None
         parsed_date = pd.to_datetime(value("date"), errors="coerce")
-        transactions.append({"row": row_number, "date": None if pd.isna(parsed_date) else parsed_date.date().isoformat(), "amount": amount, "reference": str(value("reference") or "").strip().lower(), "description": str(value("description") or "").strip()})
+        transactions.append({"row": row_number, "date": None if pd.isna(parsed_date) else parsed_date.date().isoformat(), "amount": amount, "signed_amount": signed_amount, "reference": str(value("reference") or "").strip().lower(), "description": str(value("description") or "").strip()})
     return transactions
 
 
@@ -120,10 +124,35 @@ def exact_matches(bank: list[dict[str, Any]], ledger: list[dict[str, Any]]) -> l
             ledger_tx = candidates[0]
             used_ledger.add(ledger_tx["row"])
             reference_used = bool(bank_tx["reference"] and bank_tx["reference"] == ledger_tx["reference"])
-            matches.append({"bank_row": bank_tx["row"], "ledger_row": ledger_tx["row"], "match_type": "exact", "score": 1.0 if reference_used else 0.95, "rule": "same date + amount + reference" if reference_used else "same date + amount; unique candidate", "amount": bank_tx["amount"], "transaction_date": bank_tx["date"], "status": "suggested", "evidence": {"bank": bank_tx, "ledger": ledger_tx}})
+            state = {"bank_row": bank_tx["row"], "ledger_row": ledger_tx["row"], "match_type": "exact"}
+            matches.append({"bank_row": bank_tx["row"], "ledger_row": ledger_tx["row"], "match_type": "exact", "score": 1.0 if reference_used else 0.95, "rule": "same date + amount + reference" if reference_used else "same date + amount; unique candidate", "amount": bank_tx["amount"], "transaction_date": bank_tx["date"], "status": "pending", "evidence": {"bank": bank_tx, "ledger": ledger_tx}, "original_state": state, "suggested_state": state})
         else:
-            matches.append({"bank_row": bank_tx["row"], "ledger_row": None, "match_type": "possible" if candidates else "unmatched", "score": 0.6 if candidates else 0.0, "rule": "multiple same-date/amount candidates require review" if candidates else "no same-date/amount ledger transaction", "amount": bank_tx["amount"], "transaction_date": bank_tx["date"], "status": "suggested", "evidence": {"bank": bank_tx, "candidate_rows": [tx["row"] for tx in candidates]}})
+            match_type = "possible" if candidates else "unmatched"
+            exception = detect_exception(bank_tx, candidates, ledger)
+            state = {"bank_row": bank_tx["row"], "ledger_row": None, "match_type": match_type}
+            matches.append({"bank_row": bank_tx["row"], "ledger_row": None, "match_type": match_type, "score": 0.6 if candidates else 0.0, "rule": "multiple same-date/amount candidates require review" if candidates else "no same-date/amount ledger transaction", "amount": bank_tx["amount"], "transaction_date": bank_tx["date"], "status": "pending", "evidence": {"bank": bank_tx, "candidate_rows": [tx["row"] for tx in candidates]}, "exception_type": exception, "exception_status": "pending", "original_state": state, "suggested_state": state})
     for ledger_tx in ledger:
         if ledger_tx["row"] not in used_ledger:
-            matches.append({"bank_row": None, "ledger_row": ledger_tx["row"], "match_type": "unmatched", "score": 0.0, "rule": "no exact bank transaction", "amount": ledger_tx["amount"], "transaction_date": ledger_tx["date"], "status": "suggested", "evidence": {"ledger": ledger_tx}})
+            state = {"bank_row": None, "ledger_row": ledger_tx["row"], "match_type": "unmatched"}
+            matches.append({"bank_row": None, "ledger_row": ledger_tx["row"], "match_type": "unmatched", "score": 0.0, "rule": "no exact bank transaction", "amount": ledger_tx["amount"], "transaction_date": ledger_tx["date"], "status": "pending", "evidence": {"ledger": ledger_tx}, "exception_type": "unmatched_ledger_transaction", "exception_status": "pending", "original_state": state, "suggested_state": state})
     return matches
+
+
+def detect_exception(bank_tx: dict[str, Any], candidates: list[dict[str, Any]], ledger: list[dict[str, Any]]) -> str:
+    """Conservative deterministic labels: these are review possibilities, never allegations."""
+    description = bank_tx.get("description", "").lower()
+    if any(word in description for word in ("fee", "service charge", "bank charge")):
+        return "bank_fee"
+    if any(word in description for word in ("refund", "returned payment")):
+        return "refund"
+    if any(word in description for word in ("reversal", "reversed")):
+        return "reversal"
+    same_amount = [tx for tx in ledger if tx.get("amount") == bank_tx.get("amount")]
+    if len(same_amount) > 1 or len(candidates) > 1:
+        return "duplicate_payment"
+    same_reference = [tx for tx in ledger if bank_tx.get("reference") and tx.get("reference") == bank_tx.get("reference")]
+    if same_reference:
+        return "amount_date_reference_mismatch"
+    if bank_tx.get("amount", 0) > 0 and any(word in description for word in ("deposit", "credit")):
+        return "missing_deposit"
+    return "unmatched_bank_transaction"

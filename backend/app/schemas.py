@@ -252,4 +252,23 @@ class ReconciliationCreate(BaseModel):
 
 
 class MatchDecision(BaseModel):
-    status: Literal["confirmed", "rejected"]
+    status: Literal["approved", "rejected", "pending"]
+    note: str | None = Field(default=None, max_length=2000)
+    idempotency_key: str | None = Field(default=None, max_length=100)
+
+
+class ManualMatchCreate(BaseModel):
+    bank_row: int = Field(ge=2)
+    ledger_row: int = Field(ge=2)
+    note: str | None = Field(default=None, max_length=2000)
+    idempotency_key: str | None = Field(default=None, max_length=100)
+
+
+class ReconciliationAction(BaseModel):
+    note: str | None = Field(default=None, max_length=2000)
+    idempotency_key: str | None = Field(default=None, max_length=100)
+
+
+class BalanceUpdate(BaseModel):
+    opening_balance: float
+    closing_balance: float

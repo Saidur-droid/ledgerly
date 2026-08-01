@@ -26,3 +26,12 @@ def test_initial_postgres_migration_covers_ledgerly_schema():
     assert "email VARCHAR(320) NOT NULL UNIQUE" in migration
     assert "CREATE INDEX IF NOT EXISTS ix_uploads_user_id" in migration
     assert "CREATE INDEX IF NOT EXISTS ix_uploads_created_at" in migration
+
+
+def test_reconciliation_center_migration_has_audit_and_review_indexes():
+    migration = (MIGRATIONS_DIRECTORY / "003_reconciliation_center.sql").read_text(encoding="utf-8")
+    assert "CREATE TABLE reconciliation_audit_events" in migration
+    assert "original_state JSONB" in migration
+    assert "suggested_state JSONB" in migration
+    assert "final_state JSONB" in migration
+    assert "uq_reconciliation_audit_idempotency" in migration

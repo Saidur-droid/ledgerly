@@ -14,6 +14,7 @@ import {
   Menu,
   MessageSquareText,
   Plus,
+  Scale,
   Settings,
   Sparkles,
   TrendingUp,
@@ -68,6 +69,7 @@ const nav = [
   { label: "Analytics", icon: BarChart3 },
   { label: "Ask Ledgerly", icon: MessageSquareText },
   { label: "Data sources", icon: FileSpreadsheet },
+  { label: "Reconciliation", icon: Scale },
 ];
 
 function formatMoney(value: number) {
@@ -446,6 +448,7 @@ export default function Dashboard() {
                 if (index === 1) document.getElementById("analytics")?.scrollIntoView({ behavior: "smooth" });
                 if (index === 2) document.getElementById("ask-ledgerly")?.scrollIntoView({ behavior: "smooth", block: "center" });
                 if (index === 3) setUploadOpen(true);
+                if (index === 4) window.location.href = "/reconciliation";
               }}
             >
               <Icon size={18} /><span>{label}</span>{label === "Ask Ledgerly" && <span className="ai-pill">AI</span>}
