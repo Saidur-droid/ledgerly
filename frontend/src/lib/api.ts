@@ -31,6 +31,13 @@ export type UploadRecord = {
   created_at: string;
 };
 
+export type DataInboxDetail = {
+  upload: UploadRecord;
+  profile: { role: string; period: string | null; currency: string | null; column_mapping: Record<string, string>; mapping_confidence: number; mapping_approved: boolean };
+  issues: Array<{ id: number; row_number: number | null; column_name: string | null; issue_type: string; severity: string; original_value: unknown; suggested_value: unknown; final_value: unknown; status: string; explanation: string }>;
+  summary: { total: number; pending: number; errors: number };
+};
+
 export type Pulse = {
   score: number;
   confidence: number;
@@ -459,6 +466,18 @@ export function updateProfile(profile: Pick<User, "email" | "full_name">) {
 
 export function listUploads() {
   return request<UploadRecord[]>("/api/v1/uploads");
+}
+
+export function getDataInbox(uploadId: number) {
+  return request<DataInboxDetail>(`/api/v1/data-inbox/${uploadId}`);
+}
+
+export function approveMapping(uploadId: number, profile: DataInboxDetail["profile"]) {
+  return request(`/api/v1/data-inbox/${uploadId}/mapping`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: profile.role, period: profile.period, currency: profile.currency, column_mapping: profile.column_mapping }) });
+}
+
+export function reviewCleaningIssue(uploadId: number, issueId: number, status: "approved" | "rejected", finalValue: unknown) {
+  return request(`/api/v1/data-inbox/${uploadId}/issues/${issueId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, final_value: finalValue }) });
 }
 
 export function getLatestPulse() {

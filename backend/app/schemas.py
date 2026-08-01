@@ -232,3 +232,24 @@ class PulseRead(BaseModel):
     factors: list[dict]
     metrics: dict
     comparison: dict | None = None
+
+
+class MappingUpdate(BaseModel):
+    role: Literal["bank_statement", "ledger", "sales", "expenses", "unknown"]
+    period: str | None = Field(default=None, max_length=40)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    column_mapping: dict[str, str]
+
+
+class CleaningDecision(BaseModel):
+    status: Literal["approved", "rejected"]
+    final_value: AnalysisValue = None
+
+
+class ReconciliationCreate(BaseModel):
+    bank_upload_id: int
+    ledger_upload_id: int
+
+
+class MatchDecision(BaseModel):
+    status: Literal["confirmed", "rejected"]

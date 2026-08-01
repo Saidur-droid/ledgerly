@@ -39,14 +39,18 @@ import {
   clearSession,
   downloadLatestReport,
   getCurrentUser,
+  getDataInbox,
   getLatestPulse,
   getSettings,
   hasSession,
   listUploads,
+  approveMapping,
+  reviewCleaningIssue,
   localMarkdownResponse,
   type AskLedgerlyResponse,
   type Pulse,
   type User,
+  type DataInboxDetail,
   updateProfile,
   uploadBusinessData,
 } from "@/lib/api";
@@ -91,7 +95,8 @@ export default function Dashboard() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fileName, setFileName] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [inboxDetail, setInboxDetail] = useState<DataInboxDetail | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [profileName, setProfileName] = useState("");
   const [profileEmail, setProfileEmail] = useState("");
@@ -331,33 +336,32 @@ export default function Dashboard() {
     }
   }
 
-  function selectFile(file: File | null) {
+  function selectFiles(files: File[]) {
     setUploadError("");
     setFeedback("");
-    if (!file) {
-      setSelectedFile(null);
+    if (!files.length) {
+      setSelectedFiles([]);
       setFileName("");
       return;
     }
-    const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-    if (!ALLOWED_EXTENSIONS.has(extension)) {
+    if (files.some((file) => !ALLOWED_EXTENSIONS.has(file.name.split(".").pop()?.toLowerCase() ?? ""))) {
       setUploadError("Choose a CSV, XLSX, PDF, or JSON file.");
-      setSelectedFile(null);
+      setSelectedFiles([]);
       setFileName("");
       return;
     }
-    if (file.size > MAX_UPLOAD_BYTES) {
+    if (files.some((file) => file.size > MAX_UPLOAD_BYTES)) {
       setUploadError("The file exceeds the 20 MB upload limit.");
-      setSelectedFile(null);
+      setSelectedFiles([]);
       setFileName("");
       return;
     }
-    setSelectedFile(file);
-    setFileName(file.name);
+    setSelectedFiles(files);
+    setFileName(files.length === 1 ? files[0].name : `${files.length} files selected`);
   }
 
   async function analyzeFile() {
-    if (!selectedFile) return;
+    if (!selectedFiles.length) return;
     if (!hasSession()) {
       window.location.href = "/login";
       return;
@@ -366,12 +370,15 @@ export default function Dashboard() {
     setUploadError("");
     setPageError("");
     try {
-      const pulse = await uploadBusinessData(selectedFile);
-      setLivePulse(pulse);
-      setUploadCount((count) => count + 1);
-      setFeedback(`${selectedFile.name} was analyzed and saved.`);
+      let pulse: Pulse | null = null;
+      for (const file of selectedFiles) pulse = await uploadBusinessData(file);
+      if (pulse) setLivePulse(pulse);
+      setUploadCount((count) => count + selectedFiles.length);
+      const uploads = await listUploads();
+      if (uploads[0]) setInboxDetail(await getDataInbox(uploads[0].id));
+      setFeedback(`${selectedFiles.length} file${selectedFiles.length === 1 ? " was" : "s were"} analyzed. Review mappings and cleaning suggestions below.`);
       setUploadOpen(false);
-      setSelectedFile(null);
+      setSelectedFiles([]);
       setFileName("");
       if (fileInput.current) fileInput.current.value = "";
     } catch (error) {
@@ -381,6 +388,19 @@ export default function Dashboard() {
     } finally {
       setUploading(false);
     }
+  }
+
+  async function approveCurrentMapping() {
+    if (!inboxDetail) return;
+    await approveMapping(inboxDetail.upload.id, inboxDetail.profile);
+    setInboxDetail(await getDataInbox(inboxDetail.upload.id));
+    setFeedback("Column mapping approved and saved for this source.");
+  }
+
+  async function decideIssue(issueId: number, status: "approved" | "rejected", suggested: unknown) {
+    if (!inboxDetail) return;
+    await reviewCleaningIssue(inboxDetail.upload.id, issueId, status, suggested);
+    setInboxDetail(await getDataInbox(inboxDetail.upload.id));
   }
 
   const firstName = currentUser?.full_name.split(" ")[0] ?? "";
@@ -468,6 +488,15 @@ export default function Dashboard() {
 
           {pageError && <div className="status-banner status-error" role="alert">{pageError}</div>}
           {feedback && <div className="status-banner status-success" role="status">{feedback}</div>}
+
+          {inboxDetail && (
+            <section className="panel inbox-review" aria-labelledby="inbox-heading">
+              <div className="panel-heading"><div><p className="eyebrow">DATA INBOX</p><h3 id="inbox-heading">Review {inboxDetail.upload.filename}</h3><p>Source values remain unchanged until you approve each suggestion.</p></div><span className="review-count">{inboxDetail.summary.pending} pending</span></div>
+              <div className="inbox-profile"><span><small>Role</small><strong>{metricLabel(inboxDetail.profile.role)}</strong></span><span><small>Period</small><strong>{inboxDetail.profile.period ?? "Not detected"}</strong></span><span><small>Currency</small><strong>{inboxDetail.profile.currency ?? "Not detected"}</strong></span><button className="secondary-button" onClick={approveCurrentMapping}>{inboxDetail.profile.mapping_approved ? "Mapping saved" : "Approve mapping"}</button></div>
+              <div className="mapping-chips">{Object.entries(inboxDetail.profile.column_mapping).map(([target, source]) => <span key={target}>{source} → {target}</span>)}</div>
+              <div className="issue-list">{inboxDetail.issues.slice(0, 12).map((issue) => <div className="issue-row" key={issue.id}><div><strong>{metricLabel(issue.issue_type)}</strong><p>Row {issue.row_number ?? "—"}{issue.column_name ? ` · ${issue.column_name}` : ""} — {issue.explanation}</p></div><span className={`issue-status ${issue.severity}`}>{issue.status}</span>{issue.status === "pending" && <div className="issue-actions"><button onClick={() => decideIssue(issue.id, "rejected", issue.original_value)}>Keep original</button>{issue.suggested_value !== null && <button onClick={() => decideIssue(issue.id, "approved", issue.suggested_value)}>Approve suggestion</button>}</div>}</div>)}</div>
+            </section>
+          )}
 
           {!businessDataLoaded ? (
             <section className="pulse-card loading-card" aria-live="polite">
@@ -626,11 +655,11 @@ export default function Dashboard() {
             <div className="modal-icon"><CloudUpload size={24} /></div>
             <h2 id="upload-title">Connect your business data</h2>
             <p>Upload a statement or export. Ledgerly will identify your business metrics automatically.</p>
-            <input ref={fileInput} hidden type="file" accept=".csv,.xlsx,.pdf,.json" onChange={(e) => selectFile(e.target.files?.[0] ?? null)} />
+            <input ref={fileInput} hidden multiple type="file" accept=".csv,.xlsx,.pdf,.json" onChange={(e) => selectFiles(Array.from(e.target.files ?? []))} />
             <button className="dropzone" onClick={() => fileInput.current?.click()}>
               <Upload size={24} />
               <strong>{fileName || "Choose a file to upload"}</strong>
-              <span>CSV, XLSX, PDF, or JSON · Up to 20 MB</span>
+              <span>Multiple CSV, XLSX, PDF, or JSON files · Up to 20 MB each</span>
             </button>
             {uploadError && <p className="form-error" role="alert">{uploadError}</p>}
             <div className="privacy-note"><Check size={14} /><span>Your data is encrypted and used only to explain your business.</span></div>
