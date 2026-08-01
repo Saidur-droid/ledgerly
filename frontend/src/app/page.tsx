@@ -5,7 +5,6 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   BarChart3,
-  Bot,
   Check,
   ChevronDown,
   CloudUpload,
@@ -15,7 +14,6 @@ import {
   Menu,
   MessageSquareText,
   Plus,
-  Send,
   Settings,
   Sparkles,
   TrendingUp,
@@ -52,8 +50,7 @@ import {
   updateProfile,
   uploadBusinessData,
 } from "@/lib/api";
-import { ChatMarkdown } from "@/components/chat-markdown";
-import { AskLedgerlyResponseRenderer } from "@/components/chat-response";
+import { AskLedgerly } from "@/components/ask-ledgerly";
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set(["csv", "xlsx", "pdf", "json"]);
@@ -67,12 +64,6 @@ const nav = [
   { label: "Analytics", icon: BarChart3 },
   { label: "Ask Ledgerly", icon: MessageSquareText },
   { label: "Data sources", icon: FileSpreadsheet },
-];
-
-const quickQuestions = [
-  "What changed this month?",
-  "Where are costs increasing?",
-  "Summarize cash flow",
 ];
 
 function formatMoney(value: number) {
@@ -97,7 +88,6 @@ function formatMetric(name: string, value: number) {
 
 export default function Dashboard() {
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fileName, setFileName] = useState("");
@@ -116,6 +106,8 @@ export default function Dashboard() {
   const [uploading, setUploading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState("");
+  const [lastQuestion, setLastQuestion] = useState("");
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -295,6 +287,8 @@ export default function Dashboard() {
     const clean = prompt.trim();
     if (!clean) return;
     setMessages((current) => [...current, { role: "user", content: clean }]);
+    setLastQuestion(clean);
+    setChatError("");
     setQuestion("");
     if (!hasSession()) {
       window.location.href = "/login";
@@ -312,10 +306,7 @@ export default function Dashboard() {
         window.location.href = "/login";
         return;
       }
-      setMessages((current) => [...current, {
-        role: "assistant",
-        content: localMarkdownResponse(error instanceof Error ? error.message : "I couldn’t reach your business data."),
-      }]);
+      setChatError(error instanceof Error ? error.message : "Ledgerly couldn’t reach your business data.");
     } finally {
       setChatLoading(false);
     }
@@ -433,7 +424,7 @@ export default function Dashboard() {
                 setMobileNavOpen(false);
                 if (index === 0) window.scrollTo({ top: 0, behavior: "smooth" });
                 if (index === 1) document.getElementById("analytics")?.scrollIntoView({ behavior: "smooth" });
-                if (index === 2) setChatOpen(true);
+                if (index === 2) document.getElementById("ask-ledgerly")?.scrollIntoView({ behavior: "smooth", block: "center" });
                 if (index === 3) setUploadOpen(true);
               }}
             >
@@ -484,6 +475,7 @@ export default function Dashboard() {
               <div><h2>Loading your business data</h2><p>Reading your latest persisted results.</p></div>
             </section>
           ) : authenticatedEmpty ? (
+            <>
             <section className="pulse-card">
               <div className="pulse-score">
                 <div className="memory-icon"><CloudUpload size={22} /></div>
@@ -495,6 +487,18 @@ export default function Dashboard() {
               </div>
               <button onClick={() => setUploadOpen(true)}>Add data <ArrowUpRight size={15} /></button>
             </section>
+            <AskLedgerly
+              value={question}
+              onChange={setQuestion}
+              onSubmit={submitQuestion}
+              onRetry={() => submitQuestion(lastQuestion)}
+              response={null}
+              askedQuestion=""
+              loading={false}
+              enabled={false}
+              error=""
+            />
+            </>
           ) : livePulse ? (
           <>
           <section className="pulse-card">
@@ -506,7 +510,7 @@ export default function Dashboard() {
               <Sparkles size={18} />
               <p>{livePulse.summary}</p>
             </div>
-            <button onClick={() => setChatOpen(true)}>See full explanation <ArrowUpRight size={15} /></button>
+            <button onClick={() => document.getElementById("ask-ledgerly")?.scrollIntoView({ behavior: "smooth", block: "center" })}>Ask about this <ArrowUpRight size={15} /></button>
           </section>
 
           <section className="kpi-grid">
@@ -523,6 +527,19 @@ export default function Dashboard() {
               />
             ))}
           </section>
+
+          <AskLedgerly
+            value={question}
+            onChange={setQuestion}
+            onSubmit={submitQuestion}
+            onRetry={() => submitQuestion(lastQuestion)}
+            response={messages.length > 1 && messages.at(-1)?.role === "assistant" ? messages.at(-1)?.content as AskLedgerlyResponse : null}
+            askedQuestion={lastQuestion}
+            loading={chatLoading}
+            enabled={Boolean(livePulse)}
+            error={chatError}
+            confidenceLabel={confidenceLabel}
+          />
 
           <section className="chart-grid" id="analytics">
             <article className="panel revenue-panel">
@@ -602,8 +619,6 @@ export default function Dashboard() {
         </div>
       </main>
 
-      <button className="chat-fab" onClick={() => setChatOpen(true)}><Sparkles size={17} />Ask Ledgerly</button>
-
       {uploadOpen && (
         <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setUploadOpen(false)}>
           <div className="upload-modal" role="dialog" aria-modal="true" aria-labelledby="upload-title">
@@ -641,16 +656,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      <aside className={`chat-panel ${chatOpen ? "chat-panel-open" : ""}`}>
-        <div className="chat-header"><div><span className="bot-icon"><Bot size={18} /></span><span><strong>Ask Ledgerly</strong><small><i />Ready with your business context</small></span></div><button onClick={() => setChatOpen(false)}><X size={18} /></button></div>
-        <div className="chat-context"><Sparkles size={14} /><span>Answering only from <strong>your latest uploaded data</strong></span></div>
-        <div className="messages">
-          {messages.map((message, index) => <div key={`${message.role}-${index}`} className={`message ${message.role}`}>{message.role === "assistant" ? <AskLedgerlyResponseRenderer response={message.content} /> : <div className="message-content"><p>{message.content}</p></div>}{message.role === "assistant" && livePulse && <small>Based on your latest persisted upload · {confidenceLabel}</small>}</div>)}
-          {chatLoading && <div className="message assistant"><ChatMarkdown content="Reading your business data..." /></div>}
-          {messages.length === 1 && livePulse && <div className="quick-questions">{quickQuestions.map((item) => <button key={item} disabled={chatLoading} onClick={() => submitQuestion(item)}>{item}</button>)}</div>}
-        </div>
-        <div className="chat-composer"><textarea disabled={!livePulse || chatLoading} value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitQuestion(); } }} placeholder={livePulse ? "Ask about your business..." : "Upload business data to start asking questions"} /><button disabled={!livePulse || chatLoading || !question.trim()} onClick={() => submitQuestion()}><Send size={16} /></button><small>Ledgerly explains your data — it doesn&apos;t give financial advice.</small></div>
-      </aside>
     </div>
   );
 }

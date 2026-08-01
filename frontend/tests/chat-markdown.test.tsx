@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { ChatMarkdown } from "../src/components/chat-markdown";
 import { AskLedgerlyResponseRenderer } from "../src/components/chat-response";
+import { ASK_LEDGERLY_SUGGESTIONS, AskLedgerly } from "../src/components/ask-ledgerly";
 import { parseAskLedgerlyResponse } from "../src/lib/api";
 
 const fixtures = JSON.parse(
@@ -100,12 +101,14 @@ test("fuzzed JSON shapes never crash, stringify objects, or create blank bubbles
   }
 });
 
-test("table and sidebar CSS contain horizontal and mobile overflow guards", () => {
+test("tables and Ask Ledgerly contain overflow, mobile, and motion guards", () => {
   const css = readFileSync("src/app/globals.css", "utf8");
   assert.match(css, /\.markdown-table-scroll\s*\{[\s\S]*?overflow-x:\s*auto/);
   assert.match(css, /\.messages\s*\{[\s\S]*?overflow-x:\s*hidden/);
   assert.match(css, /\.structured-analysis\s*\{[\s\S]*?max-width:\s*100%/);
-  assert.match(css, /@media \(max-width: 480px\)[\s\S]*?\.chat-panel\s*\{\s*width:\s*100%/);
+  assert.match(css, /@media \(max-width: 480px\)[\s\S]*?\.ask-ledgerly\s*\{/);
+  assert.match(css, /@media \(prefers-reduced-motion:\s*reduce\)/);
+  assert.match(css, /\.suggested-questions\s*\{[\s\S]*?overflow-x:\s*auto/);
 });
 
 test("empty structured sections render a readable nonblank state", () => {
@@ -152,4 +155,26 @@ test("renders validated errors and rejects null content safely", () => {
   );
   assert.match(html, /Analysis unavailable/);
   assert.doesNotMatch(html, /\[object Object\]/);
+});
+
+test("renders the disabled Ask Ledgerly empty state from reusable suggestions", () => {
+  const html = renderToStaticMarkup(
+    <AskLedgerly
+      value=""
+      onChange={() => undefined}
+      onSubmit={() => undefined}
+      onRetry={() => undefined}
+      response={null}
+      askedQuestion=""
+      loading={false}
+      enabled={false}
+      error=""
+    />,
+  );
+  assert.match(html, /Ask your numbers a question/);
+  assert.match(html, /Upload business data to start asking questions/);
+  for (const suggestion of ASK_LEDGERLY_SUGGESTIONS) {
+    assert.match(html, new RegExp(suggestion.replace(/[?]/g, "\\?")));
+  }
+  assert.match(html, /prefers-reduced-motion|disabled/);
 });
