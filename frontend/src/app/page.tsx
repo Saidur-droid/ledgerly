@@ -43,6 +43,7 @@ import {
   getDataInbox,
   getLatestPulse,
   getLatestFinancials,
+  getOwnerDashboard,
   getMetricEvidence,
   getSettings,
   hasSession,
@@ -56,6 +57,7 @@ import {
   type DataInboxDetail,
   type FinancialCalculation,
   type MetricEvidenceResponse,
+  type OwnerDashboard,
   updateProfile,
   uploadBusinessData,
 } from "@/lib/api";
@@ -74,6 +76,8 @@ const nav = [
   { label: "Ask Ledgerly", icon: MessageSquareText },
   { label: "Data sources", icon: FileSpreadsheet },
   { label: "Reconciliation", icon: Scale },
+  { label: "Monthly closing", icon: Check },
+  { label: "Report Studio", icon: Download },
 ];
 
 function formatMoney(value: number) {
@@ -111,6 +115,7 @@ export default function Dashboard() {
   const [uploadCount, setUploadCount] = useState(0);
   const [livePulse, setLivePulse] = useState<Pulse | null>(null);
   const [financials, setFinancials] = useState<FinancialCalculation | null>(null);
+  const [ownerDashboard, setOwnerDashboard] = useState<OwnerDashboard | null>(null);
   const [evidenceDetail, setEvidenceDetail] = useState<MetricEvidenceResponse | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [evidenceError, setEvidenceError] = useState("");
@@ -225,7 +230,8 @@ export default function Dashboard() {
       listUploads(),
       getLatestPulse(),
       getLatestFinancials(),
-    ]).then(([userResult, uploadsResult, pulseResult, financialResult]) => {
+      getOwnerDashboard(),
+    ]).then(([userResult, uploadsResult, pulseResult, financialResult, dashboardResult]) => {
       if (userResult.status === "fulfilled") setCurrentUser(userResult.value);
       if (uploadsResult.status === "fulfilled") {
         setUploadCount(uploadsResult.value.length);
@@ -248,6 +254,7 @@ export default function Dashboard() {
         );
       }
       if (financialResult.status === "fulfilled") setFinancials(financialResult.value);
+      if (dashboardResult.status === "fulfilled") setOwnerDashboard(dashboardResult.value);
       if (userResult.status === "rejected" || uploadsResult.status === "rejected") {
         const reason =
           userResult.status === "rejected"
@@ -485,6 +492,8 @@ export default function Dashboard() {
                 if (index === 2) document.getElementById("ask-ledgerly")?.scrollIntoView({ behavior: "smooth", block: "center" });
                 if (index === 3) setUploadOpen(true);
                 if (index === 4) window.location.href = "/reconciliation";
+                if (index === 5) window.location.href = "/closing";
+                if (index === 6) window.location.href = "/reports";
               }}
             >
               <Icon size={18} /><span>{label}</span>{label === "Ask Ledgerly" && <span className="ai-pill">AI</span>}
@@ -604,6 +613,11 @@ export default function Dashboard() {
               <div>{financials.validations.filter((item) => item.status !== "valid").slice(0, 3).map((item) => <p key={item.code}>{item.message}</p>)}</div>
             </section>
           )}
+
+          <section className="attention-panel" aria-labelledby="attention-heading">
+            <div><h2 id="attention-heading">What needs your attention today?</h2><p>Persisted exceptions from the latest calculation and reconciliation.</p></div>
+            {ownerDashboard?.attention.length ? <div className="attention-list">{ownerDashboard.attention.map((item, index) => <button key={`${item.type}-${index}`} className={`attention-item ${item.severity}`} onClick={() => item.metric_id && openEvidence(item.metric_id)} disabled={!item.metric_id}><span>{item.title}</span><small>{item.type.replaceAll("_", " ")} · View evidence</small></button>)}</div> : <p className="attention-empty">No persisted alerts need action right now.</p>}
+          </section>
 
           <AskLedgerly
             value={question}

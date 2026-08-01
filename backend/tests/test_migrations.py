@@ -46,3 +46,13 @@ def test_financial_engine_migration_has_auditable_tenant_scoped_schema():
     assert "excluded_records JSONB" in migration
     assert "engine_version VARCHAR(40)" in migration
     assert "ON DELETE CASCADE" in migration
+
+
+def test_phase4_migration_has_closing_reporting_and_secure_share_schema():
+    migration = (MIGRATIONS_DIRECTORY / "005_monthly_closing_report_studio.sql").read_text(encoding="utf-8")
+    for table in ("workspace_closing_settings", "monthly_closing_runs", "monthly_closing_audit_events", "report_templates", "report_snapshots", "report_shares"):
+        assert f"CREATE TABLE {table}" in migration
+    assert "uq_monthly_closing_idempotency" in migration
+    assert "token_hash VARCHAR(64) NOT NULL UNIQUE" in migration
+    assert "expires_at TIMESTAMPTZ NOT NULL" in migration
+    assert "revoked_at TIMESTAMPTZ" in migration

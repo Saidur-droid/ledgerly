@@ -246,3 +246,91 @@ class ForecastResult(Base):
     shortage_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     inputs: Mapped[dict] = mapped_column(JSON, default=dict)
     daily_results: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class WorkspaceClosingSettings(Base):
+    __tablename__ = "workspace_closing_settings"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    source_mappings: Mapped[dict] = mapped_column(JSON, default=dict)
+    customer_aliases: Mapped[dict] = mapped_column(JSON, default=dict)
+    vendor_aliases: Mapped[dict] = mapped_column(JSON, default=dict)
+    categories: Mapped[dict] = mapped_column(JSON, default=dict)
+    bank_rules: Mapped[list] = mapped_column(JSON, default=list)
+    fiscal_period: Mapped[dict] = mapped_column(JSON, default=dict)
+    calculation_preferences: Mapped[dict] = mapped_column(JSON, default=dict)
+    approval_preferences: Mapped[dict] = mapped_column(JSON, default=dict)
+    selected_report_template_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class MonthlyClosingRun(Base):
+    __tablename__ = "monthly_closing_runs"
+    __table_args__ = (UniqueConstraint("user_id", "idempotency_key", name="uq_monthly_closing_idempotency"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    period: Mapped[str] = mapped_column(String(20), index=True)
+    upload_ids: Mapped[list] = mapped_column(JSON, default=list)
+    calculation_id: Mapped[int | None] = mapped_column(ForeignKey("calculation_versions.id", ondelete="SET NULL"), nullable=True, index=True)
+    reconciliation_run_id: Mapped[int | None] = mapped_column(ForeignKey("reconciliation_runs.id", ondelete="SET NULL"), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(20), default="running", index=True)
+    progress: Mapped[dict] = mapped_column(JSON, default=dict)
+    rules_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    exceptions: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MonthlyClosingAuditEvent(Base):
+    __tablename__ = "monthly_closing_audit_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("monthly_closing_runs.id", ondelete="CASCADE"), index=True)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    action: Mapped[str] = mapped_column(String(40), index=True)
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ReportTemplate(Base):
+    __tablename__ = "report_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    business_name: Mapped[str] = mapped_column(String(160))
+    logo_data: Mapped[str | None] = mapped_column(Text, nullable=True)
+    brand_color: Mapped[str] = mapped_column(String(12), default="#7357FF")
+    language: Mapped[str] = mapped_column(String(8), default="en")
+    sections: Mapped[list] = mapped_column(JSON, default=list)
+    selected_kpis: Mapped[list] = mapped_column(JSON, default=list)
+    selected_charts: Mapped[list] = mapped_column(JSON, default=list)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class ReportSnapshot(Base):
+    __tablename__ = "report_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    template_id: Mapped[int] = mapped_column(ForeignKey("report_templates.id", ondelete="CASCADE"), index=True)
+    calculation_id: Mapped[int] = mapped_column(ForeignKey("calculation_versions.id", ondelete="CASCADE"), index=True)
+    period: Mapped[str] = mapped_column(String(20))
+    content: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ReportShare(Base):
+    __tablename__ = "report_shares"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    report_id: Mapped[int] = mapped_column(ForeignKey("report_snapshots.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

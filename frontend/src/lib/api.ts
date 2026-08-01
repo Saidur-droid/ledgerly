@@ -60,6 +60,11 @@ export type FinancialMetric = { id: number; key: string; dimensions: Record<stri
 export type MetricEvidence = { id: number; source_file: string; source_location: string; included_records: string[]; excluded_records: string[]; formula: string; mappings: Record<string, string>; adjustments: unknown[]; calculated_at: string; engine_version: string };
 export type FinancialCalculation = { id: number; upload: { id: number; filename: string } | null; engine_version: string; fingerprint: string; status: "valid" | "warning" | "blocked"; created_at: string; completed_at: string | null; input_summary: { record_count: number; included_count: number; excluded_count: number }; periods: Array<{ id: number; key: string; start_date: string; end_date: string; currency: string | null; status: string }>; metrics: FinancialMetric[]; validations: Array<{ code: string; status: "valid" | "warning" | "blocked"; message: string; row_ids: string[]; details: Record<string, unknown> }>; forecast: null | { horizon_days: number; status: string; opening_cash: number | null; projected_inflow: number | null; projected_outflow: number | null; projected_closing_cash: number | null; shortage_date: string | null; inputs: Record<string, unknown>; daily_results: Array<{ date: string; closing_cash: number }> } };
 export type MetricEvidenceResponse = { metric: Pick<FinancialMetric, "id" | "key" | "value" | "status" | "breakdown">; evidence: MetricEvidence[] };
+export type OwnerDashboard = { calculation_id: number; status: string; metrics: Array<FinancialMetric & { evidence_url: string }>; attention: Array<{ type: string; title: string; severity: string; metric_id: number | null; evidence_url: string | null }>; forecast: { shortage_date: string | null } };
+export type ClosingSettings = { user_id: number; source_mappings: Record<string, unknown>; customer_aliases: Record<string, string>; vendor_aliases: Record<string, string>; categories: Record<string, unknown>; bank_rules: unknown[]; fiscal_period: Record<string, unknown>; calculation_preferences: Record<string, unknown>; approval_preferences: Record<string, unknown>; selected_report_template_id: number | null; updated_at: string | null };
+export type ClosingRun = { id: number; period: string; upload_ids: number[]; calculation_id: number | null; status: string; progress: Record<string, string>; rules_snapshot: ClosingSettings; exceptions: Array<{ type: string; code?: string; status: string; message: string; state: string }>; created_at: string; completed_at: string | null; audit_log: Array<{ id: number; action: string; created_at: string; details: Record<string, unknown> }> };
+export type ReportTemplate = { id: number; title: string; business_name: string; brand_color: string; language: "en" | "bn" | "ar" | "hi" | "es"; sections: string[]; selected_kpis: string[]; selected_charts: string[]; notes: string | null };
+export type ReportSnapshot = { id: number; title: string; business_name: string; brand_color: string; language: string; direction: "ltr" | "rtl"; period: string; metrics: Array<{ id: number; key: string; value: number | null; unit: string; evidence_ref: string }> };
 
 export type AnalysisValue = string | number | boolean | null;
 
@@ -503,6 +508,17 @@ export function getLatestPulse() {
 
 export function getLatestFinancials() { return request<FinancialCalculation>("/api/v1/financials/latest"); }
 export function getMetricEvidence(metricId: number) { return request<MetricEvidenceResponse>(`/api/v1/financials/metrics/${metricId}/evidence`); }
+export function getOwnerDashboard() { return request<OwnerDashboard>("/api/v1/dashboard"); }
+export function getClosingSettings() { return request<ClosingSettings>("/api/v1/closing/settings"); }
+export function saveClosingSettings(payload: Partial<ClosingSettings>) { return request<ClosingSettings>("/api/v1/closing/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); }
+export function listClosingRuns() { return request<ClosingRun[]>("/api/v1/closing/runs"); }
+export function runMonthlyClosing(period: string, upload_ids: number[], idempotency_key: string) { return request<ClosingRun>("/api/v1/closing/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ period, upload_ids, idempotency_key }) }); }
+export function reopenClosingRun(id: number) { return request<ClosingRun>(`/api/v1/closing/runs/${id}/reopen`, { method: "POST" }); }
+export function listReportTemplates() { return request<ReportTemplate[]>("/api/v1/report-templates"); }
+export function createReportTemplate(payload: Partial<ReportTemplate>) { return request<ReportTemplate>("/api/v1/report-templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); }
+export function createReport(payload: { template_id: number; calculation_id: number; period: string }) { return request<ReportSnapshot>("/api/v1/reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); }
+export function createReportShare(reportId: number, expires_in_hours = 168) { return request<{ id: number; token: string; url: string; expires_at: string }>(`/api/v1/reports/${reportId}/shares`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expires_in_hours }) }); }
+export async function downloadReport(reportId: number, kind: "pdf" | "xlsx") { const response = await apiFetch(`/api/v1/reports/${reportId}.${kind}`); if (!response.ok) throw new ApiError(await parseError(response), response.status); const url = URL.createObjectURL(await response.blob()); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `ledgerly-report.${kind}`; anchor.click(); URL.revokeObjectURL(url); }
 
 export function uploadBusinessData(file: File) {
   const form = new FormData();

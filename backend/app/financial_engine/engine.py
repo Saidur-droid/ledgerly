@@ -119,7 +119,7 @@ def _metric(key: str, value: float | None, included: list[str], excluded: list[s
         "key": key,
         "value": None if value is None else round(value, 2),
         "status": status,
-        "unit": "percent" if key.endswith("percent") else "currency",
+        "unit": "percent" if key.endswith("percent") or key.endswith("margin") else "currency",
         "dimensions": dimensions or {},
         "breakdown": breakdown or {},
         "evidence": {
@@ -228,6 +228,25 @@ def calculate_financials(records: list[dict[str, Any]], columns: list[str] | Non
         _metric("opening_cash", opening, [item[2] for item in opening_values], excluded, mapping),
         _metric("closing_cash", closing, [item[2] for item in closing_values] or [row["id"] for row in cash_rows], excluded, mapping, breakdown={"opening_cash": opening, "cash_inflow": inflow, "cash_outflow": outflow}),
     ]
+    gross_profit = None if revenue is None or cogs is None else revenue-cogs
+    net_profit = None if None in (revenue, cogs, opex) else revenue-cogs-opex
+    metrics.extend([
+        _metric("gross_margin", None if revenue in (None, 0) or gross_profit is None else gross_profit/revenue*100, list(dict.fromkeys(revenue_ids+cogs_ids)), excluded, mapping, formula="gross profit / revenue * 100"),
+        _metric("net_margin", None if revenue in (None, 0) or net_profit is None else net_profit/revenue*100, list(dict.fromkeys(revenue_ids+cogs_ids+opex_ids)), excluded, mapping, formula="net profit / revenue * 100"),
+    ])
+
+    expense_groups: dict[str, dict[str, Any]] = defaultdict(lambda: {"value": 0.0, "ids": []})
+    for row in valid_rows:
+        amount = row["operating_expenses"]
+        if amount is None or not row["category"]:
+            continue
+        expense_groups[row["category"]]["value"] += abs(amount)
+        expense_groups[row["category"]]["ids"].append(row["id"])
+    expense_average = sum(item["value"] for item in expense_groups.values()) / len(expense_groups) if expense_groups else None
+    for category, values in sorted(expense_groups.items(), key=lambda item: item[1]["value"], reverse=True):
+        metrics.append(_metric("expense_by_category", round(values["value"], 2), values["ids"], excluded, mapping, dimensions={"category": category}, formula="sum(operating expenses by category)"))
+        if expense_average and values["value"] > expense_average * 2:
+            metrics.append(_metric("abnormal_expense", round(values["value"], 2), values["ids"], excluded, mapping, dimensions={"category": category}, status="warning", breakdown={"category_average": round(expense_average, 2), "threshold": round(expense_average*2, 2)}, formula="category expense > 2 * mean category expense"))
 
     ar_rows: list[dict[str, Any]] = []
     ap_rows: list[dict[str, Any]] = []
