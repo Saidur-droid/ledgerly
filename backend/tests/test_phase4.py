@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 
 from app.core.database import SessionLocal
-from app.models import ReportShare
+from app.models import ReportShare, ReportSnapshot
 
 
 def auth(client, email="owner@example.com"):
@@ -67,3 +67,18 @@ def test_templates_multilingual_exports_and_secure_shares(client):
         row = db.scalar(select(ReportShare).where(ReportShare.id == second["id"]))
         row.expires_at = datetime.now(UTC) - timedelta(seconds=1); db.commit()
     assert client.get(second["url"]).status_code == 404
+
+
+def test_public_share_refuses_report_owned_by_another_tenant(client):
+    owner = auth(client, "share-owner@example.com"); other = auth(client, "share-other@example.com")
+    upload(client, owner, "owner.csv"); upload(client, other, "other.csv")
+    owner_calc = client.get("/api/v1/financials/latest", headers=owner).json(); other_calc = client.get("/api/v1/financials/latest", headers=other).json()
+    owner_template = client.post("/api/v1/report-templates", headers=owner, json={"title":"Owner report","business_name":"Owner","language":"en"}).json()
+    other_template = client.post("/api/v1/report-templates", headers=other, json={"title":"Other report","business_name":"Other","language":"en"}).json()
+    owner_report = client.post("/api/v1/reports", headers=owner, json={"template_id":owner_template["id"],"calculation_id":owner_calc["id"],"period":"2026-06"}).json()
+    other_report = client.post("/api/v1/reports", headers=other, json={"template_id":other_template["id"],"calculation_id":other_calc["id"],"period":"2026-06"}).json()
+    share = client.post(f"/api/v1/reports/{owner_report['id']}/shares", headers=owner, json={}).json()
+    with SessionLocal() as db:
+        row = db.scalar(select(ReportShare).where(ReportShare.id == share["id"])); assert db.get(ReportSnapshot, other_report["id"])
+        row.report_id = other_report["id"]; db.commit()
+    assert client.get(share["url"]).status_code == 404

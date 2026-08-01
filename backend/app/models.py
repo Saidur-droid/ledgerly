@@ -398,3 +398,26 @@ class WorkspaceAuditEvent(Base):
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PilotMetric(Base):
+    __tablename__ = "pilot_metrics"
+    __table_args__ = (UniqueConstraint("workspace_id", "period", name="uq_pilot_metric_workspace_period"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    period: Mapped[str] = mapped_column(String(7), index=True)
+    setup_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    manual_close_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ledgerly_close_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    matched_count: Mapped[int] = mapped_column(Integer, default=0)
+    possible_count: Mapped[int] = mapped_column(Integer, default=0)
+    unmatched_count: Mapped[int] = mapped_column(Integer, default=0)
+    validation_failures: Mapped[int] = mapped_column(Integer, default=0)
+    corrections_required: Mapped[int] = mapped_column(Integer, default=0)
+    report_completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    repeated_monthly_usage: Mapped[bool] = mapped_column(Boolean, default=False)
+    feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    testimonial_permission: Mapped[bool] = mapped_column(Boolean, default=False)
+    readiness_checklist: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

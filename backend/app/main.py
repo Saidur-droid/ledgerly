@@ -1,7 +1,10 @@
 from contextlib import asynccontextmanager
+import logging
+import uuid
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -24,6 +27,7 @@ async def lifespan(_: FastAPI):
 
 
 settings = get_settings()
+LOGGER = logging.getLogger("ledgerly.api")
 app = FastAPI(
     title=settings.app_name,
     description="The API behind Ledgerly — Your business speaks.",
@@ -40,6 +44,19 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(phase4_router)
 app.include_router(phase5_router)
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    request_id = request.headers.get("x-request-id", "")[:100] or str(uuid.uuid4())
+    try:
+        response = await call_next(request)
+    except Exception:
+        # Deliberately log no body, query string, token, financial values, or user data.
+        LOGGER.exception("unhandled_request_error request_id=%s method=%s path=%s", request_id, request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"detail": "An unexpected error occurred.", "request_id": request_id})
+    response.headers["x-request-id"] = request_id
+    return response
 
 
 @app.get("/health")

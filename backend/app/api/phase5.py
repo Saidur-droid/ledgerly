@@ -5,12 +5,13 @@ from collections import defaultdict, deque
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models import (CalculatedMetric, CalculationVersion, ReportSnapshot, ReconciliationRun,
+from app.models import (CalculatedMetric, CalculationVersion, PilotMetric, ReportSnapshot, ReconciliationRun,
     Upload, User, Workspace, WorkspaceAuditEvent, WorkspaceMember, WorkspaceNote, WorkspacePeriod)
 
 router = APIRouter(prefix="/api/v1/accountant", tags=["accountant-workspace"])
@@ -46,6 +47,55 @@ def limited(user_id: int, endpoint: str, limit: int = 20) -> None:
         while queue and queue[0] < now - 60: queue.popleft()
         if len(queue) >= limit: raise HTTPException(429, "Rate limit exceeded. Try again shortly.")
         queue.append(now)
+
+
+@router.get("/pilot/sample-template.csv", response_class=PlainTextResponse)
+def pilot_sample_template() -> str:
+    return "date,description,revenue,cogs,expenses,cash,currency\n2026-01-31,Example month,0,0,0,0,USD\n"
+
+
+@router.put("/workspaces/{workspace_id}/pilot/{period}")
+def save_pilot_metrics(workspace_id: int, period: str, payload: dict = Body(...), user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    membership(db, workspace_id, user.id, {"owner", "accountant"})
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", period):
+        raise HTTPException(422, "period must be YYYY-MM.")
+    row = db.scalar(select(PilotMetric).where(PilotMetric.workspace_id == workspace_id, PilotMetric.period == period)) or PilotMetric(workspace_id=workspace_id, period=period)
+    integer_fields = {"setup_minutes", "manual_close_minutes", "ledgerly_close_minutes", "matched_count", "possible_count", "unmatched_count", "validation_failures", "corrections_required"}
+    boolean_fields = {"report_completed", "repeated_monthly_usage", "testimonial_permission"}
+    for key in integer_fields & payload.keys():
+        value = payload[key]
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+            raise HTTPException(422, f"{key} must be a non-negative integer or null.")
+        setattr(row, key, value)
+    for key in boolean_fields & payload.keys():
+        if not isinstance(payload[key], bool): raise HTTPException(422, f"{key} must be boolean.")
+        setattr(row, key, payload[key])
+    if "feedback" in payload:
+        feedback = str(payload["feedback"] or "").strip()
+        if len(feedback) > 5000: raise HTTPException(422, "feedback must be at most 5000 characters.")
+        row.feedback = feedback or None
+    if "readiness_checklist" in payload:
+        if not isinstance(payload["readiness_checklist"], dict) or not all(isinstance(v, bool) for v in payload["readiness_checklist"].values()): raise HTTPException(422, "readiness_checklist values must be boolean.")
+        row.readiness_checklist = payload["readiness_checklist"]
+    db.add(row); db.flush(); audit(db, workspace_id, user.id, "pilot.metrics_saved", "pilot_metric", row.id, {"period": period}); db.commit(); db.refresh(row)
+    data = model(row); before = row.manual_close_minutes; after = row.ledgerly_close_minutes
+    data["time_saved_minutes"] = before - after if before is not None and after is not None else None
+    total = row.matched_count + row.possible_count + row.unmatched_count
+    data["reconciliation_accuracy_percent"] = round(row.matched_count / total * 100, 2) if total else None
+    return data
+
+
+@router.get("/workspaces/{workspace_id}/pilot")
+def pilot_report(workspace_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    workspace, _ = membership(db, workspace_id, user.id)
+    rows = db.scalars(select(PilotMetric).where(PilotMetric.workspace_id == workspace_id).order_by(PilotMetric.period)).all()
+    periods = []
+    for row in rows:
+        item = model(row); total = row.matched_count + row.possible_count + row.unmatched_count
+        item["time_saved_minutes"] = row.manual_close_minutes - row.ledgerly_close_minutes if row.manual_close_minutes is not None and row.ledgerly_close_minutes is not None else None
+        item["reconciliation_accuracy_percent"] = round(row.matched_count / total * 100, 2) if total else None
+        periods.append(item)
+    return {"workspace_id": workspace.id, "workspace_name": workspace.name, "currency": workspace.currency, "periods": periods, "notice": "Pilot metrics are user-entered or system-counted; Ledgerly does not invent customer outcomes."}
 
 
 @router.post("/workspaces", status_code=201)

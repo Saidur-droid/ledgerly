@@ -193,7 +193,10 @@ def create_report(payload: dict = Body(...), user: User = Depends(get_current_us
     content_metrics = [{"id": m.id, "key": m.metric_key, "value": m.value, "unit": m.unit, "dimensions": json.loads(m.dimensions_key or "{}"), "evidence_ref": f"metric:{m.id}"} for m in metrics if not selected or m.metric_key in selected]
     metric_map = {m["key"]: m for m in content_metrics if not m["dimensions"]}
     def refs(*keys: str) -> list[dict]: return [metric_map[key] for key in keys if key in metric_map]
-    content = {"title": template.title, "business_name": template.business_name, "logo_data": template.logo_data, "brand_color": template.brand_color, "language": template.language, "direction": "rtl" if template.language == "ar" else "ltr", "sections": template.sections, "selected_charts": template.selected_charts, "notes": template.notes, "date_range": payload.get("date_range") or {"period": payload.get("period", "")}, "period": payload.get("period", ""), "currency": db.scalar(select(Upload).where(Upload.id == calc.upload_id)).normalized_data.get("metadata", {}).get("currency"), "metrics": content_metrics,
+    source_upload = db.scalar(select(Upload).where(Upload.id == calc.upload_id, Upload.user_id == user.id))
+    if source_upload is None:
+        raise HTTPException(409, "The calculation source is unavailable.")
+    content = {"title": template.title, "business_name": template.business_name, "logo_data": template.logo_data, "brand_color": template.brand_color, "language": template.language, "direction": "rtl" if template.language == "ar" else "ltr", "sections": template.sections, "selected_charts": template.selected_charts, "notes": template.notes, "date_range": payload.get("date_range") or {"period": payload.get("period", "")}, "period": payload.get("period", ""), "currency": source_upload.normalized_data.get("metadata", {}).get("currency"), "metrics": content_metrics,
         "executive_summary": {"calculation_status": calc.status, "metric_refs": refs("revenue", "gross_profit", "net_profit", "closing_cash")},
         "profit_loss": refs("revenue", "cogs", "gross_profit", "operating_expenses", "net_profit", "gross_margin", "net_margin"),
         "cash_flow": refs("opening_cash", "cash_inflow", "cash_outflow", "closing_cash", "forecast_closing_cash"),
@@ -249,7 +252,10 @@ def public_report(token: str, db: Session = Depends(get_db)) -> str:
     row = db.scalar(select(ReportShare).where(ReportShare.token_hash == hashlib.sha256(token.encode()).hexdigest()))
     now = datetime.now(UTC)
     if not row or row.revoked_at or row.expires_at.replace(tzinfo=UTC) <= now: raise HTTPException(404, "This report link is unavailable.")
-    report = db.get(ReportSnapshot, row.report_id); content = report.content; labels = LABELS[content["language"]]
+    report = db.scalar(select(ReportSnapshot).where(ReportSnapshot.id == row.report_id, ReportSnapshot.user_id == row.user_id))
+    if report is None:
+        raise HTTPException(404, "This report link is unavailable.")
+    content = report.content; labels = LABELS[content["language"]]
     rows = "".join(f"<tr><td>{html.escape(m['key'].replace('_',' ').title())}</td><td>{html.escape(str(m['value']))}</td><td>{html.escape(m['evidence_ref'])}</td></tr>" for m in content["metrics"])
     risks = "".join(f"<li>{html.escape(r['message'])}</li>" for r in content["risks"])
     return f'''<!doctype html><html lang="{content['language']}" dir="{content['direction']}"><head><meta charset="utf-8"><meta name="robots" content="noindex"><title>{html.escape(content['title'])}</title></head><body><main><h1>{html.escape(content['title'])}</h1><h2>{html.escape(content['business_name'])}</h2><p>{html.escape(content['period'])}</p><p>Calculation status: {html.escape(content['executive_summary']['calculation_status'])}</p><table><thead><tr><th>{labels['metric']}</th><th>{labels['value']}</th><th>{labels['evidence']}</th></tr></thead><tbody>{rows}</tbody></table><ul>{risks}</ul></main></body></html>'''

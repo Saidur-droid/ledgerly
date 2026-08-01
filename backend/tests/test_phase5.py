@@ -58,3 +58,24 @@ def test_dashboard_notes_and_cross_workspace_file_security(client):
     assert client.post(f"/api/v1/accountant/workspaces/{ws['id']}/notes",headers=owner,json={"period_id":period["id"],"body":"Client confirmed opening balance."}).status_code==201
     dashboard=client.get("/api/v1/accountant/dashboard",headers=owner).json()
     assert dashboard["summary"]["missing_data"]==1 and dashboard["clients"][0]["role"]=="owner"
+
+
+def test_pilot_metrics_are_isolated_validated_and_calculated(client):
+    owner=auth(client,"pilot-owner@example.com"); outsider=auth(client,"pilot-outsider@example.com"); ws=workspace(client,owner)
+    payload={"setup_minutes":45,"manual_close_minutes":300,"ledgerly_close_minutes":90,"matched_count":90,"possible_count":5,"unmatched_count":5,"validation_failures":2,"corrections_required":3,"report_completed":True,"repeated_monthly_usage":False,"feedback":"Useful review workflow.","testimonial_permission":False,"readiness_checklist":{"bank_statement":True,"ledger_export":True}}
+    saved=client.put(f"/api/v1/accountant/workspaces/{ws['id']}/pilot/2026-07",headers=owner,json=payload)
+    assert saved.status_code==200
+    assert saved.json()["time_saved_minutes"]==210
+    assert saved.json()["reconciliation_accuracy_percent"]==90.0
+    assert client.get(f"/api/v1/accountant/workspaces/{ws['id']}/pilot",headers=outsider).status_code==404
+    assert client.put(f"/api/v1/accountant/workspaces/{ws['id']}/pilot/2026-07",headers=owner,json={"matched_count":-1}).status_code==422
+    report=client.get(f"/api/v1/accountant/workspaces/{ws['id']}/pilot",headers=owner).json()
+    assert report["periods"][0]["feedback"]=="Useful review workflow."
+    assert "does not invent" in report["notice"]
+
+
+def test_sample_template_is_downloadable_and_contains_no_fake_results(client):
+    response=client.get("/api/v1/accountant/pilot/sample-template.csv")
+    assert response.status_code==200
+    assert response.text.startswith("date,description,revenue,cogs,expenses,cash,currency")
+    assert "Example month,0,0,0,0,USD" in response.text

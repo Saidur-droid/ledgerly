@@ -11,6 +11,7 @@ from app.ai.analysis import (
     _periods,
     _rank_scores,
     _ranking_groups,
+    _ordered_requested_intents,
     _requested_ranking_count,
 )
 from app.core.database import SessionLocal
@@ -23,6 +24,11 @@ PROMPT_B = (
     "Analyze each monthly row in my uploaded CSV. Identify the five best and "
     "five worst months using profit, net margin, and revenue growth. Include "
     "the exact month and values in a table."
+)
+MULTI_INTENT_PROMPT = (
+    "Show the 4 best and 4 worst months, then analyze the profit trend and "
+    "cash trend, model a 20% revenue-drop scenario, list the top 3 risks, "
+    "and give me 3 immediate actions."
 )
 
 
@@ -214,6 +220,127 @@ def test_ranking_count_defaults_to_five_and_ignores_scenario_percentages():
     assert _requested_ranking_count(
         "Show the best and worst months under a +10% revenue scenario."
     ) == 5
+
+
+@pytest.mark.parametrize(
+    ("question", "expected_intents", "expected_headings"),
+    [
+        (
+            "Analyze the profit trend and cash trend.",
+            ["profit_trend", "cash_trend"],
+            ["Profit trend", "Cash trend"],
+        ),
+        (
+            "Analyze the profit trend, model a 15% revenue increase scenario, "
+            "and list the top 3 risks.",
+            ["profit_trend", "scenario", "risks"],
+            ["Profit trend", "Scenario analysis", "Top 3 risks"],
+        ),
+        (
+            "Show the 3 best and 3 worst periods, analyze the cash trend, list "
+            "the top 2 risks, and give 2 immediate actions.",
+            ["ranking", "cash_trend", "risks", "actions"],
+            [
+                "3 best months",
+                "3 worst months",
+                "Cash trend",
+                "Top 2 risks",
+                "2 immediate actions",
+            ],
+        ),
+        (
+            "Show the 4 strongest and 4 weakest periods, analyze profit trend "
+            "and cash trend, model a 10% scenario, and list top 3 risks.",
+            ["ranking", "profit_trend", "cash_trend", "scenario", "risks"],
+            [
+                "4 best months",
+                "4 worst months",
+                "Profit trend",
+                "Cash trend",
+                "Scenario analysis",
+                "Top 3 risks",
+            ],
+        ),
+        (
+            MULTI_INTENT_PROMPT,
+            [
+                "ranking",
+                "profit_trend",
+                "cash_trend",
+                "scenario",
+                "risks",
+                "actions",
+            ],
+            [
+                "4 best months",
+                "4 worst months",
+                "Profit trend",
+                "Cash trend",
+                "20% revenue-drop scenario",
+                "Top 3 risks",
+                "3 immediate actions",
+            ],
+        ),
+    ],
+)
+def test_multi_intent_prompts_compose_every_requested_section_in_order(
+    client,
+    question: str,
+    expected_intents: list[str],
+    expected_headings: list[str],
+):
+    intent_count = len(expected_intents)
+    headers = _register(client, f"multi-intent-{intent_count}@example.com")
+    _upload_fixture(client, headers)
+
+    assert _ordered_requested_intents(question) == expected_intents
+    response = client.post(
+        "/api/v1/chat",
+        headers=headers,
+        json={"question": question},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["type"] == "structured"
+    headings = [
+        section.get("heading")
+        for section in payload["sections"]
+        if section.get("heading") != "Ranking methodology"
+    ]
+    assert headings == expected_headings
+
+
+def test_exact_multi_intent_values_counts_and_scenario_are_correct(client):
+    headers = _register(client, "multi-intent-exact@example.com")
+    _upload_fixture(client, headers)
+
+    response = client.post(
+        "/api/v1/chat",
+        headers=headers,
+        json={"question": MULTI_INTENT_PROMPT},
+    )
+
+    assert response.status_code == 200
+    sections = response.json()["sections"]
+    best, worst = sections[:2]
+    assert len(best["rows"]) == len(worst["rows"]) == 4
+    assert {row[1] for row in best["rows"]}.isdisjoint(
+        {row[1] for row in worst["rows"]}
+    )
+    assert "$22,000.00" in sections[2]["markdown"]
+    assert "$82,000.00" in sections[2]["markdown"]
+    assert "$50,000.00" in sections[3]["markdown"]
+    assert "$245,000.00" in sections[3]["markdown"]
+    scenario = sections[4]["scenarios"][0]
+    assert scenario["name"] == "Revenue -20.00%"
+    assert [item["value"] for item in scenario["outcomes"]] == [
+        "$4,362,400.00",
+        "$443,400.00",
+        "10.16%",
+    ]
+    assert len(sections[5]["items"]) == 3
+    assert len(sections[6]["items"]) == 3
 
 
 def test_cash_answer_uses_latest_balance_instead_of_sum(client):

@@ -45,7 +45,7 @@ CFO_ANALYSIS = re.compile(
     re.IGNORECASE,
 )
 ACTION_ANALYSIS = re.compile(
-    r"\b(action plan|30[/ -]60[/ -]90|recommend|operational action|next steps?)\b",
+    r"\b(actions?|action plan|30[/ -]60[/ -]90|recommend|operational action|next steps?)\b",
     re.IGNORECASE,
 )
 PRICING_OR_HIRING = re.compile(
@@ -94,6 +94,33 @@ RANKING_COUNT_PATTERNS = (
         rf"\b{RANKING_TERM}\s+(?P<count>{RANKING_COUNT_TOKEN})\b",
         re.IGNORECASE,
     ),
+)
+RANKING_REQUEST = re.compile(
+    r"(?:"
+    r"\b(?:best|worst|strongest|weakest|top|bottom)\b"
+    r"(?=.{0,100}\b(?:months?|periods?|rows?)\b)"
+    r"|"
+    r"\b(?:months?|periods?|rows?)\b"
+    r"(?=.{0,100}\b(?:best|worst|strongest|weakest|top|bottom)\b)"
+    r")",
+    re.IGNORECASE,
+)
+PROFIT_TREND_REQUEST = re.compile(
+    r"\b(?:profit(?:ability)?\s+trend|trend\s+(?:in\s+)?profit(?:ability)?)\b",
+    re.IGNORECASE,
+)
+CASH_TREND_REQUEST = re.compile(
+    r"\b(?:cash(?:\s+balance)?\s+trend|trend\s+(?:in\s+)?cash(?:\s+balance)?)\b",
+    re.IGNORECASE,
+)
+EXPLICIT_TREND_REQUEST = re.compile(
+    r"\b(?:trend|change over time|increasing|decreasing)\b",
+    re.IGNORECASE,
+)
+RISK_REQUEST = re.compile(r"\brisks?\b", re.IGNORECASE)
+ACTION_REQUEST = re.compile(
+    r"\b(?:immediate actions?|action plan|actions?|next steps?)\b",
+    re.IGNORECASE,
 )
 
 
@@ -187,6 +214,36 @@ def _requested_ranking_count(question: str) -> int:
         count = int(token) if token.isdigit() else RANKING_COUNT_WORDS[token]
         return min(max(count, 1), MAX_RANKING_COUNT)
     return DEFAULT_RANKING_COUNT
+
+
+def _ordered_requested_intents(question: str) -> list[str]:
+    matches: list[tuple[int, int, str]] = []
+
+    def add(intent: str, match: re.Match[str] | None, priority: int) -> None:
+        if match is not None:
+            matches.append((match.start(), priority, intent))
+
+    ranking = RANKING_REQUEST.search(question)
+    profit_trend = PROFIT_TREND_REQUEST.search(question)
+    cash_trend = CASH_TREND_REQUEST.search(question)
+    explicit_trend = EXPLICIT_TREND_REQUEST.search(question)
+
+    add("ranking", ranking, 0)
+    add("profit_trend", profit_trend, 1)
+    add("cash_trend", cash_trend, 2)
+    if profit_trend is None and cash_trend is None:
+        add("revenue_trend", explicit_trend, 3)
+    add("scenario", SCENARIO_ANALYSIS.search(question), 4)
+    add("forecast", FORECAST_ANALYSIS.search(question), 5)
+    add("risks", RISK_REQUEST.search(question), 6)
+    add("actions", ACTION_REQUEST.search(question), 7)
+    add("seasonality", SEASONALITY_ANALYSIS.search(question), 8)
+
+    ordered: list[str] = []
+    for _, _, intent in sorted(matches):
+        if intent not in ordered:
+            ordered.append(intent)
+    return ordered
 
 
 def _range_description(periods: list[dict[str, Any]]) -> str:
@@ -392,6 +449,75 @@ def _trend_answer(periods: list[dict[str, Any]]) -> str:
     )
 
 
+def _metric_trend_section(
+    periods: list[dict[str, Any]],
+    *,
+    metric: str,
+    heading: str,
+) -> dict[str, Any]:
+    available = [period for period in periods if period.get(metric) is not None]
+    if len(available) < 2:
+        return {
+            "type": "notice",
+            "tone": "info",
+            "heading": heading,
+            "message": (
+                f"{heading} was requested, but at least two dated "
+                f"{metric.replace('_', ' ')} values are required."
+            ),
+        }
+    first, latest = available[0], available[-1]
+    absolute_change = latest[metric] - first[metric]
+    percent_change = (
+        absolute_change / abs(first[metric]) * 100
+        if first[metric] != 0
+        else None
+    )
+    peak = max(available, key=lambda item: item[metric])
+    trough = min(available, key=lambda item: item[metric])
+    return {
+        "type": "text",
+        "heading": heading,
+        "markdown": (
+            f"{heading} moved from **{_money(first[metric])}** in "
+            f"{first['label']} to **{_money(latest[metric])}** in "
+            f"{latest['label']}, a change of **{_money(absolute_change)}** "
+            f"({_percent(percent_change)}). The highest observed value was "
+            f"{_money(peak[metric])} in {peak['label']}; the lowest was "
+            f"{_money(trough[metric])} in {trough['label']}."
+        ),
+    }
+
+
+def _cash_trend_section(periods: list[dict[str, Any]]) -> dict[str, Any]:
+    available = [period for period in periods if period["cash"] is not None]
+    if len(available) < 2:
+        return {
+            "type": "notice",
+            "tone": "info",
+            "heading": "Cash trend",
+            "message": (
+                "Cash trend was requested, but at least two dated cash "
+                "balances are required."
+            ),
+        }
+    first, latest = available[0], available[-1]
+    values = [period["cash"] for period in available]
+    return {
+        "type": "text",
+        "heading": "Cash trend",
+        "markdown": (
+            f"Period-ending cash moved from **{_money(first['cash'])}** in "
+            f"{first['label']} to **{_money(latest['cash'])}** in "
+            f"{latest['label']}, a change of "
+            f"**{_money(latest['cash'] - first['cash'])}**. Average balance "
+            f"was {_money(sum(values) / len(values))}, with a minimum of "
+            f"{_money(min(values))} and maximum of {_money(max(values))}. "
+            "Cash is treated as an ending balance and is not summed."
+        ),
+    }
+
+
 def _seasonality_answer(periods: list[dict[str, Any]]) -> str:
     buckets: dict[int, list[float]] = {}
     for period in periods:
@@ -494,7 +620,37 @@ def _cash_answer(context: dict[str, Any]) -> str:
     )
 
 
-def _risk_answer(periods: list[dict[str, Any]]) -> dict[str, Any]:
+def _requested_list_count(
+    question: str,
+    noun_pattern: str,
+    *,
+    default: int,
+) -> int:
+    patterns = (
+        re.compile(
+            rf"\b(?:top\s+)?(?P<count>{RANKING_COUNT_TOKEN})\s+"
+            rf"(?:immediate\s+)?{noun_pattern}\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            rf"\b{noun_pattern}\s+(?P<count>{RANKING_COUNT_TOKEN})\b",
+            re.IGNORECASE,
+        ),
+    )
+    for pattern in patterns:
+        match = pattern.search(question)
+        if match is None:
+            continue
+        token = match.group("count").lower()
+        count = int(token) if token.isdigit() else RANKING_COUNT_WORDS[token]
+        return min(max(count, 1), 10)
+    return default
+
+
+def _risk_section(
+    periods: list[dict[str, Any]],
+    question: str,
+) -> dict[str, Any]:
     losses = [period for period in periods if period["profit"] is not None and period["profit"] < 0]
     declines = [
         period
@@ -506,12 +662,31 @@ def _risk_answer(periods: list[dict[str, Any]]) -> dict[str, Any]:
         if declines
         else None
     )
+    margin_periods = [
+        period for period in periods if period["net_margin"] is not None
+    ]
+    margin_declines = sum(
+        current["net_margin"] < previous["net_margin"]
+        for previous, current in zip(margin_periods, margin_periods[1:])
+    )
+    cash_periods = [period for period in periods if period["cash"] is not None]
+    cash_drawdowns = sum(
+        current["cash"] < previous["cash"]
+        for previous, current in zip(cash_periods, cash_periods[1:])
+    )
+    expense_pressure = sum(
+        current["expenses"] is not None
+        and previous["expenses"] not in (None, 0)
+        and current["revenue_growth"] is not None
+        and (
+            (current["expenses"] - previous["expenses"])
+            / previous["expenses"]
+            * 100
+        )
+        > current["revenue_growth"]
+        for previous, current in zip(periods, periods[1:])
+    )
     risks = [
-        {
-            "label": "Loss-making periods",
-            "detail": f"{len(losses)} period(s) had negative profit.",
-            "severity": "high" if losses else "low",
-        },
         {
             "label": "Revenue declines",
             "detail": (
@@ -526,7 +701,54 @@ def _risk_answer(periods: list[dict[str, Any]]) -> dict[str, Any]:
             ),
             "severity": "medium" if declines else "low",
         },
+        {
+            "label": "Margin compression",
+            "detail": (
+                f"Net margin declined in {margin_declines} sequential "
+                "period comparison(s)."
+            ),
+            "severity": "medium" if margin_declines else "low",
+        },
+        {
+            "label": "Cash balance drawdowns",
+            "detail": (
+                f"Ending cash declined in {cash_drawdowns} sequential "
+                "period comparison(s)."
+            ),
+            "severity": "medium" if cash_drawdowns else "low",
+        },
+        {
+            "label": "Expense growth pressure",
+            "detail": (
+                f"Expense growth exceeded revenue growth in {expense_pressure} "
+                "period comparison(s)."
+            ),
+            "severity": "medium" if expense_pressure else "low",
+        },
+        {
+            "label": "Loss-making periods",
+            "detail": f"{len(losses)} period(s) had negative profit.",
+            "severity": "high" if losses else "low",
+        },
     ]
+    severity_order = {"high": 0, "medium": 1, "low": 2}
+    risks.sort(key=lambda risk: severity_order[risk["severity"]])
+    count = _requested_list_count(
+        question,
+        r"risks?",
+        default=3,
+    )
+    return {
+        "type": "risks",
+        "heading": f"Top {min(count, len(risks))} risks",
+        "items": risks[:count],
+    }
+
+
+def _risk_answer(
+    periods: list[dict[str, Any]],
+    question: str = "",
+) -> dict[str, Any]:
     return {
         "type": "structured",
         "content": None,
@@ -539,11 +761,7 @@ def _risk_answer(periods: list[dict[str, Any]]) -> dict[str, Any]:
                     "they are not predictions or regulated recommendations."
                 ),
             },
-            {
-                "type": "risks",
-                "heading": "Ranked data risks",
-                "items": risks,
-            },
+            _risk_section(periods, question),
         ],
     }
 
@@ -590,6 +808,12 @@ def _scenario_answer(context: dict[str, Any], question: str) -> str | dict[str, 
     expenses = _number(metrics.get("expenses"))
     changes = re.findall(r"([+-]?\d+(?:\.\d+)?)\s*%", question)
     change = float(changes[0]) if changes else 10.0
+    if re.search(
+        r"\b(?:drop|decline|decrease|reduction|down)\b",
+        question,
+        re.IGNORECASE,
+    ):
+        change = -abs(change)
     if revenue is None or expenses is None:
         return "Revenue and expenses are required for a scenario calculation."
     scenario_revenue = revenue * (1 + change / 100)
@@ -614,6 +838,65 @@ def _scenario_answer(context: dict[str, Any], question: str) -> str | dict[str, 
                 ],
             }],
         }],
+    }
+
+
+def _action_section(
+    periods: list[dict[str, Any]],
+    question: str,
+) -> dict[str, Any]:
+    count = _requested_list_count(
+        question,
+        r"actions?",
+        default=3,
+    )
+    actions = [
+        {
+            "label": "Review the weakest ranked periods",
+            "detail": (
+                "Reconcile the source rows behind the lowest composite scores "
+                "and confirm the recorded revenue and expenses."
+            ),
+            "priority": "high",
+        },
+        {
+            "label": "Investigate revenue declines",
+            "detail": (
+                "Compare declining periods with adjacent months using only the "
+                "uploaded revenue and expense fields."
+            ),
+            "priority": "high",
+        },
+        {
+            "label": "Monitor ending cash",
+            "detail": (
+                "Track the latest ending balance against the observed minimum "
+                "and first-to-latest change; do not sum monthly balances."
+            ),
+            "priority": "high",
+        },
+        {
+            "label": "Reconcile margin compression",
+            "detail": (
+                "Validate periods where expenses grew faster than revenue or "
+                "net margin declined."
+            ),
+            "priority": "medium",
+        },
+        {
+            "label": "Compare the next upload",
+            "detail": (
+                "Use Business Memory to compare the next period with the "
+                "current persisted history."
+            ),
+            "priority": "medium",
+        },
+    ]
+    selected = actions[:count]
+    return {
+        "type": "actions",
+        "heading": f"{len(selected)} immediate actions",
+        "items": selected,
     }
 
 
@@ -661,6 +944,153 @@ def _reconciliation_answer(
                 ],
             },
         ],
+    }
+
+
+def _sections_or_notice(
+    answer: str | dict[str, Any],
+    *,
+    heading: str,
+) -> list[dict[str, Any]]:
+    if isinstance(answer, dict):
+        sections = answer.get("sections")
+        if isinstance(sections, list):
+            return sections
+    return [{
+        "type": "notice",
+        "tone": "info",
+        "heading": heading,
+        "message": str(answer),
+    }]
+
+
+def _text_analysis_section(
+    answer: str,
+    *,
+    heading: str,
+) -> dict[str, Any]:
+    unavailable = answer.startswith(
+        (
+            "At least ",
+            "The current upload does not contain enough ",
+            "The latest upload does not contain ",
+        )
+    )
+    if unavailable:
+        return {
+            "type": "notice",
+            "tone": "info",
+            "heading": heading,
+            "message": answer,
+        }
+    return {
+        "type": "text",
+        "heading": heading,
+        "markdown": answer,
+    }
+
+
+def _composed_answer(
+    context: dict[str, Any],
+    question: str,
+    periods: list[dict[str, Any]],
+    intents: list[str],
+) -> dict[str, Any]:
+    sections: list[dict[str, Any]] = []
+    include_ranking_method = False
+
+    for intent in intents:
+        if intent == "ranking":
+            ranked = _rank_scores(periods)
+            if not ranked:
+                sections.append({
+                    "type": "notice",
+                    "tone": "info",
+                    "heading": "Period ranking",
+                    "message": (
+                        "Period ranking was requested, but row-level revenue, "
+                        "expenses, and profit are required."
+                    ),
+                })
+                continue
+            best, worst = _ranking_groups(
+                ranked,
+                _requested_ranking_count(question),
+            )
+            sections.extend([
+                _period_section(f"{len(best)} best months", best),
+                _period_section(f"{len(worst)} worst months", worst),
+            ])
+            include_ranking_method = True
+        elif intent == "profit_trend":
+            sections.append(
+                _metric_trend_section(
+                    periods,
+                    metric="profit",
+                    heading="Profit trend",
+                )
+            )
+        elif intent == "cash_trend":
+            sections.append(_cash_trend_section(periods))
+        elif intent == "revenue_trend":
+            sections.append(
+                _text_analysis_section(
+                    _trend_answer(periods),
+                    heading="Revenue trend",
+                )
+            )
+        elif intent == "scenario":
+            scenario_sections = _sections_or_notice(
+                _scenario_answer(context, question),
+                heading="Scenario analysis",
+            )
+            percentage = re.search(r"(\d+(?:\.\d+)?)\s*%", question)
+            if (
+                percentage is not None
+                and re.search(
+                    r"\b(?:drop|decline|decrease|reduction|down)\b",
+                    question,
+                    re.IGNORECASE,
+                )
+            ):
+                scenario_sections[0]["heading"] = (
+                    f"{percentage.group(1)}% revenue-drop scenario"
+                )
+            sections.extend(scenario_sections)
+        elif intent == "forecast":
+            sections.extend(
+                _sections_or_notice(
+                    _forecast_answer(periods),
+                    heading="Historical run-rate forecast",
+                )
+            )
+        elif intent == "risks":
+            sections.append(_risk_section(periods, question))
+        elif intent == "actions":
+            sections.append(_action_section(periods, question))
+        elif intent == "seasonality":
+            sections.append(
+                _text_analysis_section(
+                    _seasonality_answer(periods),
+                    heading="Seasonality",
+                )
+            )
+
+    if include_ranking_method:
+        sections.append({
+            "type": "notice",
+            "tone": "info",
+            "heading": "Ranking methodology",
+            "message": (
+                f"Composite score: {RANKING_FORMULA}. Each input is min-max "
+                "normalized before weighting; the first period receives a "
+                f"neutral growth score of {MISSING_GROWTH_SCORE:.2f}."
+            ),
+        })
+    return {
+        "type": "structured",
+        "content": None,
+        "sections": sections,
     }
 
 
@@ -889,29 +1319,24 @@ def deterministic_answer(
     if not metrics:
         return "I could not identify enough structured metrics in the latest upload to answer that confidently."
     periods = _periods(context)
-    complex_intents = sum(
-        bool(pattern.search(question))
-        for pattern in (
-            PERIOD_ANALYSIS,
-            SCENARIO_ANALYSIS,
-            FORECAST_ANALYSIS,
-            RISK_ANALYSIS,
+    requested_intents = _ordered_requested_intents(question)
+    if CFO_ANALYSIS.search(question) or PRICING_OR_HIRING.search(question):
+        return _cfo_answer(context, question, periods)
+    if len(requested_intents) >= 2:
+        return _composed_answer(
+            context,
+            question,
+            periods,
+            requested_intents,
         )
-    )
-    if complex_intents >= 3:
-        return _comprehensive_answer(context, question, periods)
-    if (
-        CFO_ANALYSIS.search(question)
-        or ACTION_ANALYSIS.search(question)
-        or PRICING_OR_HIRING.search(question)
-    ):
+    if ACTION_ANALYSIS.search(question):
         return _cfo_answer(context, question, periods)
     if (
         RECONCILIATION_ANALYSIS.search(question)
-        and not PERIOD_ANALYSIS.search(question)
+        and not RANKING_REQUEST.search(question)
     ):
         return _reconciliation_answer(periods)
-    if PERIOD_ANALYSIS.search(question):
+    if RANKING_REQUEST.search(question):
         return _best_worst_answer(question, periods)
     if SEASONALITY_ANALYSIS.search(question):
         return _seasonality_answer(periods)
@@ -920,7 +1345,7 @@ def deterministic_answer(
     if SCENARIO_ANALYSIS.search(question):
         return _scenario_answer(context, question)
     if RISK_ANALYSIS.search(question):
-        return _risk_answer(periods)
+        return _risk_answer(periods, question)
     if CASH_ANALYSIS.search(question):
         return _cash_answer(context)
     if TREND_ANALYSIS.search(question):
