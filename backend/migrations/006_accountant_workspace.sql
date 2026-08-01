@@ -1,0 +1,14 @@
+CREATE TABLE workspaces (id SERIAL PRIMARY KEY, name VARCHAR(160) NOT NULL, owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, currency VARCHAR(3) NOT NULL DEFAULT 'USD', brand JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX ix_workspaces_owner_user_id ON workspaces(owner_user_id);
+-- ledgerly:statement-break
+CREATE TABLE workspace_members (id SERIAL PRIMARY KEY, workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, role VARCHAR(20) NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'active', created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT uq_workspace_member UNIQUE(workspace_id,user_id));
+CREATE INDEX ix_workspace_members_workspace_id ON workspace_members(workspace_id); CREATE INDEX ix_workspace_members_user_id ON workspace_members(user_id);
+-- ledgerly:statement-break
+CREATE TABLE workspace_periods (id SERIAL PRIMARY KEY, workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, period VARCHAR(7) NOT NULL, status VARCHAR(24) NOT NULL DEFAULT 'missing_data', checklist JSONB NOT NULL DEFAULT '[]'::jsonb, file_ids JSONB NOT NULL DEFAULT '[]'::jsonb, reconciliation_run_id INTEGER REFERENCES reconciliation_runs(id) ON DELETE SET NULL, report_id INTEGER REFERENCES report_snapshots(id) ON DELETE SET NULL, trial_balance JSONB NOT NULL DEFAULT '{}'::jsonb, reused_from_period_id INTEGER REFERENCES workspace_periods(id) ON DELETE SET NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT uq_workspace_period UNIQUE(workspace_id,period));
+CREATE INDEX ix_workspace_periods_workspace_id ON workspace_periods(workspace_id); CREATE INDEX ix_workspace_periods_period ON workspace_periods(period);
+-- ledgerly:statement-break
+CREATE TABLE workspace_notes (id SERIAL PRIMARY KEY, workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, period_id INTEGER REFERENCES workspace_periods(id) ON DELETE CASCADE, author_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, body TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX ix_workspace_notes_workspace_id ON workspace_notes(workspace_id);
+-- ledgerly:statement-break
+CREATE TABLE workspace_audit_events (id SERIAL PRIMARY KEY, workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, actor_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, action VARCHAR(80) NOT NULL, entity_type VARCHAR(40) NOT NULL, entity_id INTEGER, details JSONB NOT NULL DEFAULT '{}'::jsonb, idempotency_key VARCHAR(120), created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT uq_workspace_audit_idempotency UNIQUE(workspace_id,idempotency_key));
+CREATE INDEX ix_workspace_audit_events_workspace_id ON workspace_audit_events(workspace_id);

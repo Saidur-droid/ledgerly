@@ -19,6 +19,7 @@ import {
   Sparkles,
   TrendingUp,
   Upload,
+  Users,
   X,
   Zap,
 } from "lucide-react";
@@ -75,6 +76,7 @@ const nav = [
   { label: "Analytics", icon: BarChart3 },
   { label: "Ask Ledgerly", icon: MessageSquareText },
   { label: "Data sources", icon: FileSpreadsheet },
+  { label: "Accountant workspace", icon: Users },
   { label: "Reconciliation", icon: Scale },
   { label: "Monthly closing", icon: Check },
   { label: "Report Studio", icon: Download },
@@ -491,9 +493,10 @@ export default function Dashboard() {
                 if (index === 1) document.getElementById("analytics")?.scrollIntoView({ behavior: "smooth" });
                 if (index === 2) document.getElementById("ask-ledgerly")?.scrollIntoView({ behavior: "smooth", block: "center" });
                 if (index === 3) setUploadOpen(true);
-                if (index === 4) window.location.href = "/reconciliation";
-                if (index === 5) window.location.href = "/closing";
-                if (index === 6) window.location.href = "/reports";
+                if (index === 4) window.location.href = "/accountant";
+                if (index === 5) window.location.href = "/reconciliation";
+                if (index === 6) window.location.href = "/closing";
+                if (index === 7) window.location.href = "/reports";
               }}
             >
               <Icon size={18} /><span>{label}</span>{label === "Ask Ledgerly" && <span className="ai-pill">AI</span>}

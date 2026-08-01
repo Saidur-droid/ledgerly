@@ -543,6 +543,13 @@ export function askBusiness(question: string) {
   });
 }
 
+export type AccountantWorkspace = { id: number; name: string; currency: string; role: "owner"|"accountant"|"manager"; brand: Record<string,string> };
+export type WorkspacePeriod = { id:number; workspace_id:number; period:string; status:"complete"|"missing_data"|"reconciliation_pending"|"report_due"; checklist:Array<{key:string;status:string}>; file_ids:number[] };
+export type AccountantDashboard = { summary:Record<string,number>; clients:AccountantWorkspace[]; periods:WorkspacePeriod[] };
+export function getAccountantDashboard(){return request<AccountantDashboard>("/api/v1/accountant/dashboard")}
+export function createAccountantWorkspace(name:string,currency:string){return request<AccountantWorkspace>("/api/v1/accountant/workspaces",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,currency})})}
+export function createWorkspacePeriod(workspaceId:number,period:string,reuse_previous=false){return request<WorkspacePeriod>(`/api/v1/accountant/workspaces/${workspaceId}/periods`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({period,reuse_previous})})}
+
 export async function downloadLatestReport() {
   const response = await apiFetch("/api/v1/reports/latest.pdf", {
     headers: authHeaders(),

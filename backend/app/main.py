@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.routes import router
 from app.api.phase4 import router as phase4_router
+from app.api.phase5 import router as phase5_router
 from app.core.config import get_settings
 from app.core.database import Base, engine, get_db
 from app.core.migrations import run_postgres_migrations
@@ -38,6 +39,7 @@ app.add_middleware(
 )
 app.include_router(router)
 app.include_router(phase4_router)
+app.include_router(phase5_router)
 
 
 @app.get("/health")
