@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import re
 from collections import Counter
 from uuid import uuid4
@@ -45,6 +46,8 @@ from app.schemas import (
     BalanceUpdate,
     ReconciliationCreate,
 )
+
+LOGGER = logging.getLogger("ledgerly.upload")
 
 router = APIRouter(prefix="/api/v1")
 SAFE_FILENAME_SEPARATOR = re.compile(r"[/\\]+")
@@ -175,6 +178,9 @@ async def upload_business_data(
         store.save_pulse(user_id=user.id, pulse=pulse)
     except Exception as error:
         store.rollback()
+        # Never include the exception message: database errors may contain SQL
+        # parameters derived from private financial rows.
+        LOGGER.error("upload_storage_failed stage=persist_and_calculate error_type=%s", type(error).__name__)
         raise HTTPException(
             status_code=503,
             detail="Business data storage is temporarily unavailable.",

@@ -15,6 +15,7 @@ from app.api.phase5 import router as phase5_router
 from app.core.config import get_settings
 from app.core.database import Base, engine, get_db
 from app.core.migrations import run_postgres_migrations
+from app.core.storage_health import storage_readiness
 
 
 @asynccontextmanager
@@ -51,9 +52,9 @@ async def request_id_middleware(request: Request, call_next):
     request_id = request.headers.get("x-request-id", "")[:100] or str(uuid.uuid4())
     try:
         response = await call_next(request)
-    except Exception:
+    except Exception as error:
         # Deliberately log no body, query string, token, financial values, or user data.
-        LOGGER.exception("unhandled_request_error request_id=%s method=%s path=%s", request_id, request.method, request.url.path)
+        LOGGER.error("unhandled_request_error request_id=%s method=%s path=%s error_type=%s", request_id, request.method, request.url.path, type(error).__name__)
         return JSONResponse(status_code=500, content={"detail": "An unexpected error occurred.", "request_id": request_id})
     response.headers["x-request-id"] = request_id
     return response
@@ -80,3 +81,15 @@ def readiness(db: Session = Depends(get_db)) -> dict[str, str]:
         "status": "ready",
         "database": "postgresql",
     }
+
+
+@app.get("/ready/storage")
+def storage_health() -> dict[str, object]:
+    try:
+        result = storage_readiness(engine)
+    except SQLAlchemyError as error:
+        LOGGER.error("storage_readiness_failed error_type=%s", type(error).__name__)
+        raise HTTPException(status_code=503, detail="Business data storage is unavailable.") from error
+    if result["status"] != "ready":
+        raise HTTPException(status_code=503, detail=result)
+    return result
