@@ -2,7 +2,7 @@ import io
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -236,7 +236,8 @@ def parse_business_file(filename: str, content: bytes) -> ParsedBusinessData:
         raise ValueError("Unsupported file type. Use CSV, XLSX, PDF, or JSON.")
     if extension == ".csv":
         try:
-            return _frame_result(pd.read_csv(io.BytesIO(content)))
+            result = _frame_result(pd.read_csv(io.BytesIO(content)))
+            return replace(result, metadata={**result.metadata, "source_location": "CSV data"})
         except pd.errors.EmptyDataError as error:
             raise ValueError(
                 "The CSV is empty or does not contain readable columns."
@@ -246,9 +247,14 @@ def parse_business_file(filename: str, content: bytes) -> ParsedBusinessData:
                 "The CSV is malformed and could not be parsed."
             ) from error
     if extension == ".xlsx":
-        return _frame_result(pd.read_excel(io.BytesIO(content)))
+        workbook = pd.ExcelFile(io.BytesIO(content))
+        sheet_name = workbook.sheet_names[0]
+        result = _frame_result(pd.read_excel(workbook, sheet_name=sheet_name))
+        return replace(result, metadata={**result.metadata, "source_location": sheet_name})
     if extension == ".json":
         payload = json.loads(content)
         rows = payload if isinstance(payload, list) else [payload]
-        return _frame_result(pd.json_normalize(rows))
-    return _parse_pdf(content)
+        result = _frame_result(pd.json_normalize(rows))
+        return replace(result, metadata={**result.metadata, "source_location": "JSON root"})
+    result = _parse_pdf(content)
+    return replace(result, metadata={**result.metadata, "source_location": "PDF document"})

@@ -4,7 +4,7 @@ from collections import Counter
 from uuid import uuid4
 from io import BytesIO
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
@@ -24,7 +24,8 @@ from app.business_pulse.engine import calculate_pulse, compare_metrics
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import create_access_token, get_current_user, hash_password, verify_password
-from app.models import CleaningIssue, DataSourceProfile, ReconciliationAuditEvent, ReconciliationMatch, ReconciliationRun, SourceMapping, Upload, User, utcnow
+from app.financial_engine.service import calculate_upload, calculation_payload, latest_calculation_payload
+from app.models import CalculatedMetric, CalculationVersion, CleaningIssue, DataSourceProfile, MetricEvidence, ReconciliationAuditEvent, ReconciliationMatch, ReconciliationRun, SourceMapping, Upload, User, utcnow
 from app.report_engine.pdf import build_pulse_report
 from app.schemas import (
     ChatRequest,
@@ -170,6 +171,7 @@ async def upload_business_data(
             factors=pulse_result.factors,
             metrics=pulse_result.metrics,
         )
+        calculate_upload(db, user_id=user.id, upload_id=upload.id)
         store.save_pulse(user_id=user.id, pulse=pulse)
     except Exception as error:
         store.rollback()
@@ -431,22 +433,98 @@ def read_latest_pulse(
     )
 
 
+@router.post("/financials/uploads/{upload_id}/calculate")
+def recalculate_financials(
+    upload_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    try:
+        calculation = calculate_upload(db, user_id=user.id, upload_id=upload_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    db.commit()
+    return calculation_payload(db, calculation, include_evidence=False)
+
+
+@router.get("/financials/latest")
+def read_latest_financials(
+    include_evidence: bool = Query(default=False),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    payload = latest_calculation_payload(db, user_id=user.id, include_evidence=include_evidence)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Upload business data first.")
+    return payload
+
+
+@router.get("/financials/metrics/{metric_id}/evidence")
+def read_metric_evidence(
+    metric_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    metric = db.scalar(
+        select(CalculatedMetric)
+        .join(CalculationVersion, CalculationVersion.id == CalculatedMetric.calculation_id)
+        .where(CalculatedMetric.id == metric_id, CalculationVersion.user_id == user.id)
+    )
+    if metric is None:
+        raise HTTPException(status_code=404, detail="Metric not found.")
+    evidence = db.scalars(select(MetricEvidence).where(MetricEvidence.metric_id == metric.id)).all()
+    return {
+        "metric": {"id": metric.id, "key": metric.metric_key, "value": metric.value, "status": metric.status, "breakdown": metric.breakdown},
+        "evidence": [{"id": row.id, "source_file": row.source_file, "source_location": row.source_location, "included_records": row.included_records, "excluded_records": row.excluded_records, "formula": row.formula, "mappings": row.mappings, "adjustments": row.adjustments, "calculated_at": row.calculated_at.isoformat(), "engine_version": row.engine_version} for row in evidence],
+    }
 @router.post("/chat", response_model=ChatResponse)
 def chat(
     payload: ChatRequest,
     user: User = Depends(get_current_user),
     store: BusinessStore = Depends(get_business_store),
+    db: Session = Depends(get_db),
 ) -> ChatResponse:
     upload, pulse = latest_pulse(user.id, store)
+    financials = latest_calculation_payload(db, user_id=user.id, include_evidence=False)
+    calculated = {
+        item["key"]: item["value"]
+        for item in (financials or {}).get("metrics", [])
+        if item["value"] is not None and not item["dimensions"]
+    }
+    engine_metrics = {
+        "revenue": calculated.get("revenue"),
+        "expenses": calculated.get("operating_expenses"),
+        "profit": calculated.get("net_profit") or calculated.get("reported_profit"),
+        "cash": calculated.get("closing_cash"),
+    }
     context = {
         "filename": upload.filename,
         "uploaded_at": upload.created_at,
-        "metrics": pulse.metrics,
+        "metrics": {key: value for key, value in engine_metrics.items() if value is not None},
         "pulse_score": pulse.score,
         "factors": pulse.factors,
-        "data": upload.normalized_data,
+        "data": {
+            "records": (financials or {}).get("input_summary", {}).get("analysis_records", []),
+            "metadata": {**upload.normalized_data.get("metadata", {}), "calculation_version": (financials or {}).get("engine_version")},
+        },
     }
     result = answer_business_question(payload.question, context)
+    if isinstance(result.answer, dict) and financials:
+        sections = result.answer.get("sections")
+        section_types = {
+            section.get("type") for section in sections or []
+            if isinstance(section, dict)
+        }
+        if {"table", "forecast", "actions"} <= section_types and "text" not in section_types:
+            sections.append({
+                "type": "text",
+                "heading": "Calculation provenance",
+                "markdown": (
+                    "All financial values in this analysis come from the "
+                    f"persisted deterministic calculation **{financials['engine_version']}**; "
+                    "Ask Ledgerly only explains those results."
+                ),
+            })
     return serialize_ask_response(
         result.answer,
         correlation_id=uuid4().hex,

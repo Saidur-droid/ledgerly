@@ -35,3 +35,14 @@ def test_reconciliation_center_migration_has_audit_and_review_indexes():
     assert "suggested_state JSONB" in migration
     assert "final_state JSONB" in migration
     assert "uq_reconciliation_audit_idempotency" in migration
+
+
+def test_financial_engine_migration_has_auditable_tenant_scoped_schema():
+    migration = (MIGRATIONS_DIRECTORY / "004_financial_engine_lineage.sql").read_text(encoding="utf-8")
+    for table in ("calculation_versions", "financial_periods", "calculated_metrics", "metric_evidence", "validation_results", "forecast_results"):
+        assert f"CREATE TABLE {table}" in migration
+    assert "uq_calculation_user_fingerprint" in migration
+    assert "included_records JSONB" in migration
+    assert "excluded_records JSONB" in migration
+    assert "engine_version VARCHAR(40)" in migration
+    assert "ON DELETE CASCADE" in migration

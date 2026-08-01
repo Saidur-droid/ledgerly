@@ -42,6 +42,8 @@ import {
   getCurrentUser,
   getDataInbox,
   getLatestPulse,
+  getLatestFinancials,
+  getMetricEvidence,
   getSettings,
   hasSession,
   listUploads,
@@ -52,6 +54,8 @@ import {
   type Pulse,
   type User,
   type DataInboxDetail,
+  type FinancialCalculation,
+  type MetricEvidenceResponse,
   updateProfile,
   uploadBusinessData,
 } from "@/lib/api";
@@ -106,6 +110,10 @@ export default function Dashboard() {
   const [settingsError, setSettingsError] = useState("");
   const [uploadCount, setUploadCount] = useState(0);
   const [livePulse, setLivePulse] = useState<Pulse | null>(null);
+  const [financials, setFinancials] = useState<FinancialCalculation | null>(null);
+  const [evidenceDetail, setEvidenceDetail] = useState<MetricEvidenceResponse | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState("");
   const [businessDataLoaded, setBusinessDataLoaded] = useState(false);
   const [pageError, setPageError] = useState("");
   const [feedback, setFeedback] = useState("");
@@ -123,7 +131,16 @@ export default function Dashboard() {
     },
   ]);
   const fileInput = useRef<HTMLInputElement>(null);
-  const metrics = useMemo(() => livePulse?.metrics ?? {}, [livePulse]);
+  const metrics = useMemo(() => {
+    if (!financials) return livePulse?.metrics ?? {};
+    const values: Record<string, number> = {};
+    for (const metric of financials.metrics) {
+      if (metric.value === null || Object.keys(metric.dimensions).length) continue;
+      const key = metric.key === "operating_expenses" ? "expenses" : metric.key === "net_profit" ? "profit" : metric.key === "closing_cash" ? "cash" : metric.key;
+      values[key] = metric.value;
+    }
+    return values;
+  }, [financials, livePulse]);
   const metricCards = useMemo(() => {
     const preferred = ["revenue", "profit", "expenses", "net_margin"];
     const names = [
@@ -137,11 +154,13 @@ export default function Dashboard() {
       return {
         name,
         value: metrics[name],
+        metricId: financials?.metrics.find((metric) => metric.key === (name === "expenses" ? "operating_expenses" : name === "profit" ? "net_profit" : name === "cash" ? "closing_cash" : name) && !Object.keys(metric.dimensions).length)?.id,
+        status: financials?.metrics.find((metric) => metric.key === (name === "expenses" ? "operating_expenses" : name === "profit" ? "net_profit" : name === "cash" ? "closing_cash" : name) && !Object.keys(metric.dimensions).length)?.status,
         change,
         spark: change ? [change.previous, change.current] : [metrics[name]],
       };
     });
-  }, [livePulse, metrics]);
+  }, [financials, livePulse, metrics]);
   const trendData = useMemo(() => {
     const revenueChange = livePulse?.comparison?.changes.revenue;
     const expenseChange = livePulse?.comparison?.changes.expenses;
@@ -205,7 +224,8 @@ export default function Dashboard() {
       getCurrentUser(),
       listUploads(),
       getLatestPulse(),
-    ]).then(([userResult, uploadsResult, pulseResult]) => {
+      getLatestFinancials(),
+    ]).then(([userResult, uploadsResult, pulseResult, financialResult]) => {
       if (userResult.status === "fulfilled") setCurrentUser(userResult.value);
       if (uploadsResult.status === "fulfilled") {
         setUploadCount(uploadsResult.value.length);
@@ -227,6 +247,7 @@ export default function Dashboard() {
             : "Unable to load your latest Business Pulse.",
         );
       }
+      if (financialResult.status === "fulfilled") setFinancials(financialResult.value);
       if (userResult.status === "rejected" || uploadsResult.status === "rejected") {
         const reason =
           userResult.status === "rejected"
@@ -243,6 +264,20 @@ export default function Dashboard() {
       setBusinessDataLoaded(true);
     });
   }, []);
+
+  async function openEvidence(metricId?: number) {
+    if (!metricId) return;
+    setEvidenceLoading(true);
+    setEvidenceError("");
+    setEvidenceDetail(null);
+    try {
+      setEvidenceDetail(await getMetricEvidence(metricId));
+    } catch (error) {
+      setEvidenceError(error instanceof Error ? error.message : "Unable to load metric evidence.");
+    } finally {
+      setEvidenceLoading(false);
+    }
+  }
 
   const authenticatedEmpty = businessDataLoaded && uploadCount === 0;
 
@@ -375,6 +410,7 @@ export default function Dashboard() {
       let pulse: Pulse | null = null;
       for (const file of selectedFiles) pulse = await uploadBusinessData(file);
       if (pulse) setLivePulse(pulse);
+      setFinancials(await getLatestFinancials());
       setUploadCount((count) => count + selectedFiles.length);
       const uploads = await listUploads();
       if (uploads[0]) setInboxDetail(await getDataInbox(uploads[0].id));
@@ -546,7 +582,7 @@ export default function Dashboard() {
           </section>
 
           <section className="kpi-grid">
-            {metricCards.map(({ name, value, change, spark }) => (
+            {metricCards.map(({ name, value, change, spark, metricId, status }) => (
               <Metric
                 key={name}
                 label={metricLabel(name)}
@@ -556,9 +592,18 @@ export default function Dashboard() {
                 note={change ? "vs previous upload" : "latest upload"}
                 spark={spark}
                 neutral={name === "expenses"}
+                status={status}
+                onEvidence={metricId ? () => openEvidence(metricId) : undefined}
               />
             ))}
           </section>
+
+          {financials && (
+            <section className={`calculation-status ${financials.status}`} aria-live="polite">
+              <div><strong>Calculation {financials.status}</strong><span>{financials.engine_version} · {financials.input_summary.included_count} included / {financials.input_summary.excluded_count} excluded records</span></div>
+              <div>{financials.validations.filter((item) => item.status !== "valid").slice(0, 3).map((item) => <p key={item.code}>{item.message}</p>)}</div>
+            </section>
+          )}
 
           <AskLedgerly
             value={question}
@@ -651,6 +696,19 @@ export default function Dashboard() {
         </div>
       </main>
 
+      {(evidenceLoading || evidenceDetail || evidenceError) && (
+        <aside className="evidence-drawer" aria-label="Metric calculation evidence">
+          <button className="drawer-close" onClick={() => { setEvidenceDetail(null); setEvidenceError(""); setEvidenceLoading(false); }} aria-label="Close evidence">×</button>
+          {evidenceLoading ? <div className="evidence-state"><div className="loading-spinner" /><p>Loading calculation evidence…</p></div> : evidenceError ? <div className="evidence-state"><h2>Evidence unavailable</h2><p>{evidenceError}</p></div> : evidenceDetail && <>
+            <p className="eyebrow">EVIDENCE LINEAGE</p><h2>{metricLabel(evidenceDetail.metric.key)}</h2>
+            <div className={`metric-status ${evidenceDetail.metric.status}`}>{evidenceDetail.metric.status}</div>
+            <strong className="evidence-value">{evidenceDetail.metric.value === null ? "Missing data" : formatMetric(evidenceDetail.metric.key, evidenceDetail.metric.value)}</strong>
+            {Object.keys(evidenceDetail.metric.breakdown).length > 0 && <section><h3>Calculation breakdown</h3><dl>{Object.entries(evidenceDetail.metric.breakdown).map(([key, value]) => <div key={key}><dt>{metricLabel(key)}</dt><dd>{value === null ? "Missing" : formatMetric(key, value)}</dd></div>)}</dl></section>}
+            {evidenceDetail.evidence.map((evidence) => <section key={evidence.id}><h3>Source and rule</h3><dl><div><dt>File</dt><dd>{evidence.source_file}</dd></div><div><dt>Sheet / document</dt><dd>{evidence.source_location}</dd></div><div><dt>Formula</dt><dd>{evidence.formula}</dd></div><div><dt>Included records</dt><dd>{evidence.included_records.length ? evidence.included_records.join(", ") : "None"}</dd></div><div><dt>Excluded records</dt><dd>{evidence.excluded_records.length ? evidence.excluded_records.join(", ") : "None"}</dd></div><div><dt>Mappings</dt><dd>{Object.entries(evidence.mappings).map(([target, source]) => `${source} → ${target}`).join(", ") || "None"}</dd></div><div><dt>Adjustments</dt><dd>{evidence.adjustments.length ? JSON.stringify(evidence.adjustments) : "None"}</dd></div><div><dt>Calculated</dt><dd>{new Date(evidence.calculated_at).toLocaleString()}</dd></div><div><dt>Version</dt><dd>{evidence.engine_version}</dd></div></dl></section>)}
+          </>}
+        </aside>
+      )}
+
       {uploadOpen && (
         <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setUploadOpen(false)}>
           <div className="upload-modal" role="dialog" aria-modal="true" aria-labelledby="upload-title">
@@ -692,14 +750,14 @@ export default function Dashboard() {
   );
 }
 
-function Metric({ label, value, delta, direction, note, spark, neutral = false }: { label: string; value: string; delta: string; direction: "up" | "down"; note: string; spark: number[]; neutral?: boolean }) {
+function Metric({ label, value, delta, direction, note, spark, neutral = false, status, onEvidence }: { label: string; value: string; delta: string; direction: "up" | "down"; note: string; spark: number[]; neutral?: boolean; status?: "valid" | "warning" | "blocked"; onEvidence?: () => void }) {
   const minimum = Math.min(...spark);
   const maximum = Math.max(...spark);
   const range = maximum - minimum || 1;
   const points = spark.length > 1
     ? spark.map((item, index) => `${index * 80 / (spark.length - 1) + 5},${30 - ((item - minimum) / range) * 22}`).join(" ")
     : "5,19 85,19";
-  return <article className="metric-card"><div className="metric-top"><span>{label}</span></div><div className="metric-main"><strong>{value}</strong><svg viewBox="0 0 90 36" aria-hidden="true"><polyline points={points} fill="none" stroke={neutral ? "#a99aff" : "#6d50f5"} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg></div><div className="metric-foot"><span className={neutral ? "delta neutral" : "delta"}>{direction === "up" ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}{delta}</span><small>{note}</small></div></article>;
+  return <article className={`metric-card ${onEvidence ? "has-evidence" : ""}`} onClick={onEvidence} onKeyDown={(event) => event.key === "Enter" && onEvidence?.()} role={onEvidence ? "button" : undefined} tabIndex={onEvidence ? 0 : undefined}><div className="metric-top"><span>{label}</span></div><div className="metric-main"><strong>{value}</strong><svg viewBox="0 0 90 36" aria-hidden="true"><polyline points={points} fill="none" stroke={neutral ? "#a99aff" : "#6d50f5"} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg></div><div className="metric-foot"><span className={neutral ? "delta neutral" : "delta"}>{direction === "up" ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}{delta}</span><small>{note}{status ? ` · ${status}` : ""}{onEvidence ? " · View evidence" : ""}</small></div></article>;
 }
 
 function Insight({ icon, tone, title, text }: { icon: React.ReactNode; tone: string; title: string; text: string }) {

@@ -56,6 +56,11 @@ export type Pulse = {
   } | null;
 };
 
+export type FinancialMetric = { id: number; key: string; dimensions: Record<string, string>; value: number | null; unit: "currency" | "percent"; status: "valid" | "warning" | "blocked"; breakdown: Record<string, number | null> };
+export type MetricEvidence = { id: number; source_file: string; source_location: string; included_records: string[]; excluded_records: string[]; formula: string; mappings: Record<string, string>; adjustments: unknown[]; calculated_at: string; engine_version: string };
+export type FinancialCalculation = { id: number; upload: { id: number; filename: string } | null; engine_version: string; fingerprint: string; status: "valid" | "warning" | "blocked"; created_at: string; completed_at: string | null; input_summary: { record_count: number; included_count: number; excluded_count: number }; periods: Array<{ id: number; key: string; start_date: string; end_date: string; currency: string | null; status: string }>; metrics: FinancialMetric[]; validations: Array<{ code: string; status: "valid" | "warning" | "blocked"; message: string; row_ids: string[]; details: Record<string, unknown> }>; forecast: null | { horizon_days: number; status: string; opening_cash: number | null; projected_inflow: number | null; projected_outflow: number | null; projected_closing_cash: number | null; shortage_date: string | null; inputs: Record<string, unknown>; daily_results: Array<{ date: string; closing_cash: number }> } };
+export type MetricEvidenceResponse = { metric: Pick<FinancialMetric, "id" | "key" | "value" | "status" | "breakdown">; evidence: MetricEvidence[] };
+
 export type AnalysisValue = string | number | boolean | null;
 
 export type AnalysisColumn = {
@@ -495,6 +500,9 @@ export function updateReconciliationBalance(runId: number, opening_balance: numb
 export function getLatestPulse() {
   return request<Pulse>("/api/v1/pulse/latest");
 }
+
+export function getLatestFinancials() { return request<FinancialCalculation>("/api/v1/financials/latest"); }
+export function getMetricEvidence(metricId: number) { return request<MetricEvidenceResponse>(`/api/v1/financials/metrics/${metricId}/evidence`); }
 
 export function uploadBusinessData(file: File) {
   const form = new FormData();

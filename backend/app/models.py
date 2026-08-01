@@ -1,6 +1,6 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -151,3 +151,98 @@ class ReconciliationAuditEvent(Base):
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CalculationVersion(Base):
+    __tablename__ = "calculation_versions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "fingerprint", name="uq_calculation_user_fingerprint"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    upload_id: Mapped[int] = mapped_column(ForeignKey("uploads.id", ondelete="CASCADE"), index=True)
+    engine_version: Mapped[str] = mapped_column(String(40))
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(12), index=True)
+    input_summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    periods: Mapped[list["FinancialPeriod"]] = relationship(cascade="all, delete-orphan")
+    metrics: Mapped[list["CalculatedMetric"]] = relationship(cascade="all, delete-orphan")
+    validations: Mapped[list["ValidationResult"]] = relationship(cascade="all, delete-orphan")
+    forecasts: Mapped[list["ForecastResult"]] = relationship(cascade="all, delete-orphan")
+
+
+class FinancialPeriod(Base):
+    __tablename__ = "financial_periods"
+    __table_args__ = (UniqueConstraint("calculation_id", "period_key", name="uq_financial_period_calculation_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    calculation_id: Mapped[int] = mapped_column(ForeignKey("calculation_versions.id", ondelete="CASCADE"), index=True)
+    period_key: Mapped[str] = mapped_column(String(20))
+    start_date: Mapped[date] = mapped_column(Date)
+    end_date: Mapped[date] = mapped_column(Date)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    status: Mapped[str] = mapped_column(String(12))
+
+
+class CalculatedMetric(Base):
+    __tablename__ = "calculated_metrics"
+    __table_args__ = (UniqueConstraint("calculation_id", "metric_key", "dimensions_key", name="uq_calculated_metric_identity"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    calculation_id: Mapped[int] = mapped_column(ForeignKey("calculation_versions.id", ondelete="CASCADE"), index=True)
+    period_id: Mapped[int | None] = mapped_column(ForeignKey("financial_periods.id", ondelete="CASCADE"), nullable=True, index=True)
+    metric_key: Mapped[str] = mapped_column(String(80), index=True)
+    dimensions_key: Mapped[str] = mapped_column(String(255), default="")
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit: Mapped[str] = mapped_column(String(20), default="currency")
+    status: Mapped[str] = mapped_column(String(12), index=True)
+    breakdown: Mapped[dict] = mapped_column(JSON, default=dict)
+    evidence: Mapped[list["MetricEvidence"]] = relationship(cascade="all, delete-orphan")
+
+
+class MetricEvidence(Base):
+    __tablename__ = "metric_evidence"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    metric_id: Mapped[int] = mapped_column(ForeignKey("calculated_metrics.id", ondelete="CASCADE"), index=True)
+    upload_id: Mapped[int] = mapped_column(ForeignKey("uploads.id", ondelete="CASCADE"), index=True)
+    source_file: Mapped[str] = mapped_column(String(255))
+    source_location: Mapped[str] = mapped_column(String(255), default="data")
+    included_records: Mapped[list] = mapped_column(JSON, default=list)
+    excluded_records: Mapped[list] = mapped_column(JSON, default=list)
+    formula: Mapped[str] = mapped_column(Text)
+    mappings: Mapped[dict] = mapped_column(JSON, default=dict)
+    adjustments: Mapped[list] = mapped_column(JSON, default=list)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    engine_version: Mapped[str] = mapped_column(String(40))
+
+
+class ValidationResult(Base):
+    __tablename__ = "validation_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    calculation_id: Mapped[int] = mapped_column(ForeignKey("calculation_versions.id", ondelete="CASCADE"), index=True)
+    code: Mapped[str] = mapped_column(String(80), index=True)
+    status: Mapped[str] = mapped_column(String(12), index=True)
+    message: Mapped[str] = mapped_column(Text)
+    row_ids: Mapped[list] = mapped_column(JSON, default=list)
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class ForecastResult(Base):
+    __tablename__ = "forecast_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    calculation_id: Mapped[int] = mapped_column(ForeignKey("calculation_versions.id", ondelete="CASCADE"), index=True)
+    horizon_days: Mapped[int] = mapped_column(Integer, default=30)
+    status: Mapped[str] = mapped_column(String(12), index=True)
+    opening_cash: Mapped[float | None] = mapped_column(Float, nullable=True)
+    projected_inflow: Mapped[float | None] = mapped_column(Float, nullable=True)
+    projected_outflow: Mapped[float | None] = mapped_column(Float, nullable=True)
+    projected_closing_cash: Mapped[float | None] = mapped_column(Float, nullable=True)
+    shortage_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    inputs: Mapped[dict] = mapped_column(JSON, default=dict)
+    daily_results: Mapped[list] = mapped_column(JSON, default=list)
